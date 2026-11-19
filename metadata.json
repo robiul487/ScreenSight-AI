@@ -1,0 +1,6 @@
+{
+  "name": "ScreenSight AI",
+  "description": "Open-source Gemini Live screen-sharing and real-time voice assistant for Android.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,20 @@
+<resources>
+    <string name="app_name">ScreenSight AI</string>
+    <string name="app_tagline">Open-Source Gemini Live Screen Assistant</string>
+    <string name="welcome_title">Real-Time Screen &amp; Voice Intelligence</string>
+    <string name="welcome_subtitle">Share your Android screen and speak naturally with Google Gemini Live API using your own API key.</string>
+    <string name="start_live_session">Start Live Session</string>
+    <string name="resume_live_session">Return to Live Session</string>
+    <string name="configure_api_key">Configure API Key</string>
+    <string name="api_settings_title">API &amp; Model Settings</string>
+    <string name="appearance_settings_title">Appearance &amp; Voice</string>
+    <string name="privacy_security_title">Privacy &amp; Security</string>
+    <string name="security_warning_body">Your Gemini API key is stored on this device and is used to connect directly to Google\'s Gemini API. Because this is a client-side application, a determined attacker with access to the device or application runtime may be able to extract it. Only use an API key you control.</string>
+    <string name="billing_notice_body">Gemini API usage is billed or rate-limited according to your own Google AI Studio account and selected model eligibility.</string>
+    <string name="notification_channel_name">ScreenSight Live Session</string>
+    <string name="notification_channel_desc">Active while ScreenSight AI is sharing your screen or streaming voice with Gemini Live.</string>
+    <string name="notification_sharing_title">ScreenSight AI Active</string>
+    <string name="notification_sharing_text">Screen sharing and live voice session in progress</string>
+    <string name="action_stop_sharing">Stop Screen Sharing</string>
+    <string name="action_end_conversation">End Conversation</string>
+</resources>

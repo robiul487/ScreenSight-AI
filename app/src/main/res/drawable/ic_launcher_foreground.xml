@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer Screen Frame Silhouette -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M34,26h40c4.42,0 8,3.58 8,8v40c0,4.42 -3.58,8 -8,8H34c-4.42,0 -8,-3.58 -8,-8V34c0,-4.42 3.58,-8 8,-8zM34,34v40h40V34H34z" />
+    <!-- Inner AI Vision Eye & Sparkle Silhouette -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,42c-7.73,0 -14.27,4.94 -16.8,12c2.53,7.06 9.07,12 16.8,12s14.27,-4.94 16.8,-12c-2.53,-7.06 -9.07,-12 -16.8,-12zM54,61c-3.87,0 -7,-3.13 -7,-7s3.13,-7 7,-7s7,3.13 7,7s-3.13,7 -7,7z" />
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M54,49.5L55.5,52.5L58.5,54L55.5,55.5L54,58.5L52.5,55.5L49.5,54L52.5,52.5Z" />
+</vector>

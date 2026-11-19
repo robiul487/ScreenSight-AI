@@ -1,0 +1,1060 @@
+MASTER DEVELOPMENT PROMPT
+
+ScreenSight AI — Open-Source Gemini Screen Sharing Assistant
+
+1. YOUR ROLE
+
+Act as a Senior Android Engineer, Kotlin Architect, AI Integration Engineer, UI/UX Designer, and Open-Source Project Maintainer.
+
+Your task is to design, implement, test, and deliver a complete, functional Android application named ScreenSight AI.
+
+This is not a UI-only prototype. Build a real Android application with working screen capture, Gemini Live API integration, real-time audio communication, session management, and secure local configuration.
+
+You are working inside an Android app development environment using:
+
+- Kotlin
+- Android SDK
+- Jetpack Compose
+- Gradle Kotlin DSL
+
+Do not build a website, web application, React application, Flutter application, or Expo project.
+
+Do not create a backend server.
+
+Do not use any AI provider other than Google Gemini.
+
+Do not use mock AI responses in the final implementation.
+
+---
+
+2. PROJECT VISION
+
+ScreenSight AI is a free and open-source Android application that allows users to share their phone screen with Google's Gemini AI and interact with it through natural voice conversations.
+
+The user should be able to:
+
+1. Open the application.
+2. Enter their own Gemini API key.
+3. Select an available Gemini Live model.
+4. Start a live AI session.
+5. Share their Android screen.
+6. Speak naturally with Gemini.
+7. Ask questions about anything currently displayed on their screen.
+8. Receive spoken AI responses.
+9. Continue navigating their phone while the conversation remains active.
+10. Stop screen sharing or end the AI session whenever they want.
+
+The experience should feel like Google's Gemini Live screen-sharing feature, but implemented as an independent, open-source Android application.
+
+Core philosophy
+
+- Open source.
+- BYOK (Bring Your Own Key).
+- No developer-owned API key.
+- No mandatory backend.
+- No paid hosting.
+- No account registration.
+- No telemetry by default.
+- Local-first configuration.
+- User-controlled permissions.
+- Transparent API usage.
+- Simple and accessible user experience.
+
+---
+
+3. TECHNOLOGY STACK
+
+Use the following technology stack.
+
+Component| Technology
+Programming language| Kotlin
+Android UI| Jetpack Compose
+Design system| Material 3
+Architecture| MVVM + Clean Architecture
+Screen capture| Android MediaProjection
+Background operation| Foreground Service
+AI provider| Google Gemini only
+AI communication| Gemini Live API
+Network protocol| Secure WebSocket (WSS)
+Networking| OkHttp
+JSON serialization| Kotlin Serialization
+Audio recording| Android AudioRecord
+Audio playback| Android AudioTrack
+Local preferences| DataStore
+Secret storage| Android Keystore + encrypted storage
+Dependency injection| Hilt
+Asynchronous processing| Kotlin Coroutines + Flow
+Build system| Gradle Kotlin DSL
+Testing| JUnit + AndroidX Test
+
+Use current stable, mutually compatible dependencies and Android APIs.
+
+Do not blindly use outdated library versions.
+
+Do not introduce unnecessary dependencies.
+
+---
+
+4. APPLICATION ARCHITECTURE
+
+Build a fully native Android application.
+
+The architecture must follow this flow:
+
+ANDROID APPLICATION
+|
+|-- Presentation Layer
+|     |-- Home Screen
+|     |-- Live Assistant Screen
+|     |-- API Settings
+|     |-- Model Settings
+|     |-- Conversation UI
+|
+|-- Domain Layer
+|     |-- StartSessionUseCase
+|     |-- StopSessionUseCase
+|     |-- SendScreenFrameUseCase
+|     |-- StartAudioUseCase
+|     |-- SendTextMessageUseCase
+|
+|-- Data Layer
+|     |-- GeminiLiveRepository
+|     |-- GeminiWebSocketClient
+|     |-- ApiKeyRepository
+|     |-- SettingsRepository
+|
+|-- Android Services
+|-- ScreenCaptureService
+|-- AudioCaptureManager
+|-- AudioPlaybackManager
+|-- FrameProcessor
+|-- SessionManager
+
+DIRECT CONNECTION:
+
+Android App
+|
+|-- User's Gemini API Key
+|
+|-- WebSocket Connection
+|
+|-- Gemini Live API
+
+No external backend server.
+
+No database server.
+
+No developer-controlled AI infrastructure.
+
+---
+
+5. GEMINI LIVE API INTEGRATION
+
+This is the most important part of the project.
+
+Implement real integration with the official Gemini Live API.
+
+Official documentation:
+https://ai.google.dev/gemini-api/docs/live
+
+Live API reference:
+https://ai.google.dev/api/live
+
+Android Live API documentation:
+https://developer.android.com/ai/gemini/live
+
+5.1 API configuration
+
+Create a dedicated Gemini configuration module.
+
+Responsibilities:
+
+- Accept user-provided API key.
+- Validate that the key is not empty.
+- Allow the user to select a supported Live API model.
+- Establish an authenticated WebSocket connection.
+- Send the initial session setup message.
+- Receive server responses.
+- Handle errors.
+- Manage connection lifecycle.
+- Close sessions correctly.
+
+Use the official Gemini Live API WebSocket protocol.
+
+Do not invent endpoints or message structures.
+
+Use the currently documented endpoint and message schema.
+
+For direct API-key authentication, construct the connection using the official Gemini Live WebSocket endpoint and the user's key.
+
+Never hardcode a developer API key.
+
+5.2 Model selection
+
+Create a model selector.
+
+Requirements:
+
+- Display supported Gemini Live models.
+- Allow model selection.
+- Save the selected model locally.
+- Validate model compatibility before connecting.
+- Show model connection errors clearly.
+- Never assume that a model appearing in the general Gemini API quota dashboard necessarily supports Live API.
+
+Use the official model documentation to determine available models.
+
+Treat model identifiers as configurable values, not scattered hardcoded strings.
+
+If the model list cannot be fetched, show a locally maintained list of verified Live API model identifiers and an option to enter a model identifier manually.
+
+Do not silently substitute a different model.
+
+5.3 Session configuration
+
+Configure:
+
+- Input audio modality.
+- Video/image input.
+- Audio response modality.
+- System instructions.
+- Voice configuration where supported.
+- Media resolution where supported.
+- Automatic voice activity detection where supported.
+- Appropriate output configuration.
+
+Create a dedicated configuration builder.
+
+Example conceptual configuration:
+
+{
+"responseModalities": ["AUDIO"],
+"systemInstruction": {
+"parts": [
+{
+"text": "You are ScreenSight AI, a helpful screen-aware voice assistant."
+}
+]
+}
+}
+
+This is illustrative. Follow the actual API schema and selected model's supported features.
+
+5.4 WebSocket management
+
+Implement a robust WebSocket client.
+
+Required functions:
+
+- connect()
+- disconnect()
+- sendSetup()
+- sendVideoFrame()
+- sendAudioChunk()
+- sendTextMessage()
+- receiveMessages()
+- handleServerContent()
+- handleAudioResponse()
+- handleTurnComplete()
+- handleInterrupted()
+- handleError()
+
+Implement:
+
+- Connection timeout.
+- Connection state monitoring.
+- Ping/pong handling where applicable.
+- Graceful disconnect.
+- Reconnection when appropriate.
+- Session timeout handling.
+- Cancellation of ongoing jobs.
+- Prevention of duplicate sessions.
+
+Never create multiple active WebSocket connections accidentally.
+
+Do not reconnect indefinitely.
+
+Show useful errors rather than hiding them.
+
+---
+
+6. ANDROID SCREEN SHARING
+
+Implement real Android screen capture using MediaProjection.
+
+Official Android documentation:
+https://developer.android.com/media/grow/media-projection
+
+6.1 Screen sharing workflow
+
+When the user taps "Share Screen":
+
+1. Check Android permissions and service requirements.
+2. Launch the official MediaProjection consent flow.
+3. Wait for the user to grant permission.
+4. Start the required foreground service.
+5. Initialize MediaProjection.
+6. Create a virtual display.
+7. Capture frames using ImageReader or an equivalent supported approach.
+8. Process frames.
+9. Send frames to Gemini Live API.
+10. Continue until the user stops sharing or Android revokes the projection.
+
+Do not bypass the Android system permission dialog.
+
+Do not capture the screen before permission is granted.
+
+6.2 Android compatibility
+
+Respect modern Android MediaProjection restrictions.
+
+In particular:
+
+- Follow Android 14+ consent and token lifecycle requirements.
+- Do not reuse a MediaProjection grant improperly.
+- Register and handle MediaProjection callbacks.
+- Handle user-initiated stopping.
+- Handle screen lock and application termination.
+- Handle service destruction.
+- Handle projection revocation.
+- Use the correct foreground service type and permissions for the target Android version.
+
+Keep compatibility logic version-aware.
+
+6.3 Frame processing
+
+Do not send unprocessed full-resolution screenshots continuously.
+
+Implement a FrameProcessor.
+
+Responsibilities:
+
+- Capture frames.
+- Resize images.
+- Maintain aspect ratio.
+- Compress to JPEG.
+- Avoid memory leaks.
+- Release ImageReader images promptly.
+- Avoid blocking the main thread.
+- Discard obsolete frames.
+- Limit unnecessary duplicate frames.
+
+Initial recommended configuration:
+
+Setting| Initial value
+Frame rate| 1 FPS
+Maximum image dimension| 1280 px
+Image format| JPEG
+JPEG quality| 70
+Frame queue| Maximum 1 pending frame
+Processing| Background dispatcher
+
+These values must be configurable internally.
+
+Important: Gemini Live video processing has model/API-specific limitations, including documented 1 FPS video processing. Do not promise smooth, frame-by-frame video understanding.
+
+If the screen remains unchanged, avoid sending redundant frames where possible.
+
+If the screen changes, send the latest available frame.
+
+Never allow a growing frame queue.
+
+The AI should prioritize the latest screen state.
+
+6.4 Screen capture lifecycle
+
+Implement:
+
+- startCapture()
+- stopCapture()
+- pauseCapture()
+- resumeCapture()
+- releaseCapture()
+
+The stop operation must:
+
+- Stop the frame loop.
+- Release VirtualDisplay.
+- Close ImageReader.
+- Stop MediaProjection.
+- Release related resources.
+- Update application state.
+
+Ensure no capture process remains running after the user stops sharing.
+
+---
+
+7. REAL-TIME AUDIO SYSTEM
+
+Build two-way voice communication.
+
+The user should be able to speak and hear Gemini without manually recording and uploading audio files.
+
+7.1 Microphone input
+
+Use Android AudioRecord.
+
+Implement:
+
+- Microphone permission request.
+- AudioRecord initialization.
+- Continuous audio capture.
+- PCM conversion.
+- Correct sample rate and channel configuration.
+- Chunked audio streaming.
+- Buffer management.
+- Audio stream termination.
+- Microphone mute/unmute.
+
+Follow the selected Gemini Live model's documented audio format.
+
+For models using the documented native audio configuration, use the appropriate PCM format, including 16-bit little-endian input at 16 kHz where required.
+
+Never assume every model accepts identical audio configuration.
+
+7.2 AI audio output
+
+Use Android AudioTrack.
+
+Implement:
+
+- Receiving audio chunks.
+- Decoding supported payloads.
+- PCM playback.
+- Correct output sample rate.
+- Buffer management.
+- Playback queue.
+- Interruption handling.
+- Stop and release.
+
+For models using native audio output, follow the documented output format, including 24 kHz PCM where applicable.
+
+7.3 Natural conversation
+
+Support:
+
+- Voice Activity Detection where supported.
+- Automatic turn detection.
+- User interruption.
+- AI interruption.
+- Listening indicator.
+- Speaking indicator.
+- Microphone mute.
+- AI voice mute.
+
+If the user speaks while Gemini is responding, handle the interruption according to the selected model's protocol.
+
+Do not allow audio playback and recording to cause uncontrolled feedback.
+
+Use audio focus correctly.
+
+---
+
+8. SCREEN-AWARE AI PERSONALITY
+
+Create a dedicated system instruction.
+
+The assistant should behave like a helpful screen-aware AI companion.
+
+Default system instruction:
+
+"You are ScreenSight AI, a real-time visual assistant.
+
+You can receive screenshots or video frames of the user's shared Android screen and audio or text messages from the user.
+
+Your responsibilities:
+
+1. Understand the visible screen.
+2. Answer questions based on what is actually visible.
+3. Explain app interfaces.
+4. Help users navigate settings.
+5. Troubleshoot visible errors.
+6. Explain buttons, menus, and UI elements.
+7. Provide clear step-by-step instructions.
+8. Remember relevant context within the current session.
+9. Speak naturally and concisely.
+10. Ask for clarification when the screen is unclear.
+
+Important rules:
+
+- Never pretend to see something that is not visible.
+- Do not invent buttons, settings, or app content.
+- Clearly distinguish observations from assumptions.
+- If a screen changes, use the latest available visual context.
+- Never claim that you clicked or changed something unless a supported action actually occurred.
+- Do not request passwords, OTPs, recovery codes, or other secrets.
+- Warn users when sensitive information is visible.
+- Never expose private information unnecessarily.
+- Respond in the language used by the user.
+- Use simple, natural spoken language.
+- Prefer concise instructions over lengthy explanations."
+
+Allow the user to customize the assistant's preferred response language later.
+
+---
+
+9. USER INTERFACE DESIGN
+
+Design a premium, minimalist Android application.
+
+Use Material 3.
+
+Visual direction:
+
+- Modern.
+- Clean.
+- Minimal.
+- Professional.
+- Comfortable on small mobile screens.
+- Dark and light themes.
+- Smooth but lightweight animations.
+- Clear typography.
+- Accessible touch targets.
+
+Do not create an unnecessarily complicated dashboard.
+
+9.1 Main screen
+
+The home screen must include:
+
+Header:
+
+- ScreenSight AI logo.
+- App name.
+- Settings icon.
+
+Main section:
+
+- Welcome message.
+- Gemini connection status.
+- Selected model.
+- API key status.
+- Start Live button.
+
+Secondary information:
+
+- Last session status.
+- Quick settings access.
+- Privacy information.
+
+The main Start Live button should be visually prominent.
+
+9.2 Live assistant screen
+
+Design a dedicated live conversation interface.
+
+Elements:
+
+- Live session indicator.
+- Screen sharing status.
+- Microphone status.
+- Gemini speaking/listening indicator.
+- Conversation transcript.
+- User voice transcript where supported.
+- Stop Screen Sharing.
+- End Conversation.
+- Microphone toggle.
+- AI audio toggle.
+
+Use clear states:
+
+IDLE
+CONNECTING
+CONNECTED
+REQUESTING_SCREEN_PERMISSION
+SHARING_SCREEN
+LISTENING
+THINKING
+SPEAKING
+RECONNECTING
+ERROR
+STOPPED
+
+Do not represent all states with the same generic spinner.
+
+9.3 API settings screen
+
+Create a settings page with:
+
+- Gemini API key input.
+- Show/hide API key.
+- Validate API key button.
+- Save API key.
+- Remove API key.
+- Selected model.
+- Model compatibility information.
+- API documentation link.
+- Security warning.
+
+Display this warning:
+
+"Your Gemini API key is stored on this device and is used to connect directly to Google's Gemini API. Because this is a client-side application, a determined attacker with access to the device or application runtime may be able to extract it. Only use an API key you control."
+
+Never log the complete API key.
+
+Mask the key after saving.
+
+Do not send the API key to any developer-owned server.
+
+9.4 Appearance settings
+
+Include:
+
+- System theme.
+- Light theme.
+- Dark theme.
+- Dynamic color where supported.
+- Language preference.
+- Haptic feedback toggle.
+
+---
+
+10. LOCAL STORAGE AND SECURITY
+
+This is a BYOK application.
+
+The user owns the API key.
+
+Implement local-only configuration.
+
+Use Android Keystore to protect the encryption key and an appropriate encrypted storage solution for API key persistence.
+
+Requirements:
+
+- No plaintext API key in logs.
+- No API key in crash reports.
+- No API key in analytics.
+- No API key committed to Git.
+- No hardcoded developer credentials.
+- No API key copied into debug output.
+- No API key sent to third-party services.
+- Allow key deletion.
+- Clear sensitive session data when appropriate.
+
+Be honest about the security limitations of storing user-controlled API credentials in a client application.
+
+Do not claim that encryption makes the key impossible to extract.
+
+---
+
+11. CONVERSATION MANAGEMENT
+
+Create a lightweight in-memory conversation manager.
+
+Support:
+
+- Current session transcript.
+- User message.
+- AI text response when available.
+- Conversation state.
+- Session timestamps.
+- Clear conversation.
+- New session.
+
+Do not build a remote database.
+
+Do not upload conversation history.
+
+By default, do not persist screen images or microphone recordings.
+
+Allow the application to clear temporary session data after ending a session.
+
+If the API provides audio transcription, use it where supported.
+
+Do not assume every native-audio model automatically provides textual output.
+
+---
+
+12. ERROR HANDLING
+
+Create a centralized error-handling system.
+
+Handle at least these scenarios:
+
+API:
+
+- Missing API key.
+- Invalid API key.
+- API permission error.
+- Unsupported model.
+- Quota exceeded.
+- Rate limit exceeded.
+- Billing restriction.
+- Server unavailable.
+- WebSocket connection failure.
+
+Android:
+
+- Microphone permission denied.
+- Screen capture permission denied.
+- MediaProjection revoked.
+- Foreground service failure.
+- AudioRecord initialization failure.
+- AudioTrack failure.
+- Application background restrictions.
+
+Network:
+
+- Internet unavailable.
+- Connection timeout.
+- Connection lost.
+- Server closed session.
+- Session expired.
+
+Show useful messages.
+
+Examples:
+
+"Your Gemini API key is invalid. Please check your key."
+
+"Your selected model does not support Gemini Live API."
+
+"Your API quota has been reached. Check your Google AI Studio usage limits."
+
+"Screen sharing was stopped by Android."
+
+Do not expose raw stack traces to ordinary users.
+
+Keep technical logs available in debug builds without exposing secrets.
+
+---
+
+13. NETWORK AND RESOURCE OPTIMIZATION
+
+The application should work efficiently on ordinary Android devices.
+
+Target:
+
+- Low CPU consumption.
+- Low memory consumption.
+- Minimal unnecessary network traffic.
+- No continuous full-resolution frame uploads.
+- No unnecessary background processing.
+- Efficient audio buffering.
+- No memory leaks.
+
+Implement backpressure.
+
+When the network becomes slow:
+
+- Drop outdated screen frames.
+- Keep only the latest useful frame.
+- Do not accumulate old audio indefinitely.
+- Show connection quality.
+- Allow graceful recovery.
+
+Do not claim that API costs are zero.
+
+Show a notice explaining that Gemini usage is billed or limited according to the user's own Google AI Studio account and model eligibility.
+
+---
+
+14. APP PERMISSIONS
+
+Use only necessary Android permissions.
+
+Review the exact requirements for the chosen target SDK.
+
+Potential permissions include:
+
+- INTERNET
+- RECORD_AUDIO
+- FOREGROUND_SERVICE
+- FOREGROUND_SERVICE_MEDIA_PROJECTION
+
+Add any required newer Android foreground-service permissions and notification permissions according to the target SDK.
+
+Do not request:
+
+- Contacts.
+- Location.
+- SMS.
+- Phone state.
+- Storage access unless genuinely necessary.
+
+Do not use Accessibility Service in the initial version.
+
+Do not implement hidden screen recording.
+
+The user must always initiate screen sharing through the official Android consent dialog.
+
+---
+
+15. PRIVACY AND USER CONTROL
+
+Create a Privacy & Security page.
+
+Explain:
+
+1. Screen frames are transmitted to Google's Gemini API.
+2. Microphone audio is transmitted to Google's Gemini API during voice sessions.
+3. API usage belongs to the user's own account.
+4. The application has no developer-owned backend.
+5. API keys remain on the user's device.
+6. The application does not intentionally save screen recordings.
+7. Screen sharing can be stopped at any time.
+8. Google's API data handling and retention policies apply.
+
+Add an explicit confirmation before the first live session.
+
+Never claim that information sent to Gemini remains exclusively on the device.
+
+---
+
+16. OPEN-SOURCE PROJECT REQUIREMENTS
+
+Prepare the project for public GitHub release.
+
+Repository name:
+
+screensight-ai
+
+License:
+
+Apache License 2.0
+
+Include:
+
+README.md
+LICENSE
+CONTRIBUTING.md
+SECURITY.md
+PRIVACY.md
+CHANGELOG.md
+.gitignore
+
+README must include:
+
+- Project introduction.
+- Screenshots section.
+- Features.
+- Architecture.
+- Technology stack.
+- Requirements.
+- Installation instructions.
+- Android Studio setup.
+- Gemini API key setup.
+- How to obtain a Gemini API key.
+- How to build the APK.
+- Troubleshooting.
+- Known limitations.
+- Privacy information.
+- Contribution instructions.
+
+Do not include API keys or secrets in example files.
+
+Create a sample configuration file only when necessary, using placeholders.
+
+---
+
+17. TESTING REQUIREMENTS
+
+Do not consider the project complete just because it compiles once.
+
+Write unit tests for:
+
+- API configuration.
+- WebSocket message serialization.
+- Frame processing.
+- Session state transitions.
+- Error handling.
+- Settings persistence.
+
+Write Android integration tests for:
+
+- Permission flow where testable.
+- UI navigation.
+- API settings.
+- Session lifecycle.
+- Start and stop behavior.
+
+Manually validate on a physical Android device when available.
+
+Important test cases:
+
+1. Start application with no API key.
+2. Enter an API key.
+3. Save and reload settings.
+4. Validate the connection.
+5. Start a Gemini Live session.
+6. Request screen-sharing permission.
+7. Share the screen.
+8. Ask a spoken question.
+9. Receive a spoken response.
+10. Navigate between Android apps.
+11. Confirm new screen frames are sent.
+12. Mute microphone.
+13. Resume microphone.
+14. Stop screen sharing.
+15. End conversation.
+16. Restart the application.
+17. Test an invalid API key.
+18. Test an unsupported model.
+19. Test no internet connection.
+20. Test API quota exhaustion.
+
+If a physical device is unavailable, implement tests and clearly identify which behaviors still need device validation.
+
+---
+
+18. DEVELOPMENT STRATEGY
+
+Build the application in small, verifiable phases.
+
+Do not generate the entire application as disconnected code snippets.
+
+Create actual project files.
+
+Phase 1: Project foundation
+
+- Create Android project.
+- Configure Gradle.
+- Configure Kotlin.
+- Configure Compose.
+- Set up MVVM architecture.
+- Create navigation.
+- Create theme.
+- Create basic screens.
+
+Deliverable: Application launches successfully.
+
+Phase 2: API configuration
+
+- API key input.
+- API key validation.
+- Encrypted local storage.
+- Model selector.
+- Gemini connection configuration.
+
+Deliverable: User can configure their own Gemini API access.
+
+Phase 3: Gemini Live connection
+
+- WebSocket implementation.
+- Session setup.
+- Server message handling.
+- Connection states.
+- Error handling.
+
+Deliverable: A real Gemini Live session connects.
+
+Phase 4: Audio
+
+- AudioRecord.
+- PCM processing.
+- Audio streaming.
+- AudioTrack.
+- Voice responses.
+- Microphone control.
+
+Deliverable: Two-way voice conversation works.
+
+Phase 5: Screen capture
+
+- MediaProjection permission.
+- Foreground service.
+- VirtualDisplay.
+- ImageReader.
+- FrameProcessor.
+- JPEG encoding.
+- Video frame streaming.
+
+Deliverable: Gemini receives real screen frames.
+
+Phase 6: Full integration
+
+- Audio + screen simultaneously.
+- Conversation context.
+- Interruption handling.
+- Lifecycle management.
+- Resource cleanup.
+
+Deliverable: Working ScreenSight AI.
+
+Phase 7: Polish and release
+
+- UI refinement.
+- Dark theme.
+- Error states.
+- Privacy screen.
+- Tests.
+- README.
+- Apache 2.0 license.
+- Release APK.
+
+Deliverable: Public-release-ready open-source project.
+
+---
+
+19. IMPORTANT ENGINEERING RULES
+
+Follow these rules throughout development:
+
+1. Never create fake functionality.
+2. Never display a successful connection when no real connection exists.
+3. Never hardcode a developer API key.
+4. Never introduce a mandatory backend.
+5. Never introduce another AI provider.
+6. Never use mock responses as production functionality.
+7. Never bypass Android permission requirements.
+8. Never ignore lifecycle cleanup.
+9. Never leave TODO placeholders in critical functionality.
+10. Never create unnecessary files.
+11. Never duplicate business logic.
+12. Never block the main thread.
+13. Never accumulate unlimited image or audio buffers.
+14. Never assume all Gemini models support Live API.
+15. Never assume that API quotas are unlimited.
+16. Never silently switch models after an error.
+17. Always handle user cancellation.
+18. Always keep screen sharing under explicit user control.
+19. Always explain incomplete functionality.
+20. Always use current official Google and Android documentation.
+
+If an implementation detail is unclear, research the official documentation before writing code.
+
+Do not invent SDK methods or Gradle dependencies.
+
+---
+
+20. DEFINITION OF DONE
+
+The project is complete only when:
+
+- The application builds successfully.
+- The application launches.
+- Users can configure their own Gemini API key.
+- The key is stored locally.
+- A real supported Gemini Live model can connect.
+- Android MediaProjection can capture the screen.
+- Screen frames can reach Gemini.
+- Microphone audio can reach Gemini.
+- Gemini audio responses can play through the phone speaker.
+- The conversation works while the user navigates other apps.
+- The user can stop sharing at any time.
+- The application cleans up its resources.
+- Error states work.
+- README and license are included.
+- No mandatory backend or hosting is required.
+
+Provide the final project structure, build instructions, testing results, known limitations, and APK location.
+
+Do not claim successful testing unless the relevant test was actually performed.
+
+---
+
+FINAL INSTRUCTION
+
+Start by inspecting the existing Android development environment and project files.
+
+Then create the application foundation and proceed through the development phases.
+
+Prioritize a working end-to-end MVP over decorative features.
+
+If the entire implementation cannot fit into one development operation, continue through the phases while preserving the existing project structure.
+
+Do not stop after producing a plan or a UI mockup.
+
+Your goal is to deliver a real, functional, installable, open-source Android application.
+
+Build ScreenSight AI.
