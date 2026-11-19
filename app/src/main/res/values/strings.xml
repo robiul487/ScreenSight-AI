@@ -35,4 +35,11 @@
     <string name="family_mode_retry">আমি বুঝতে পারিনি, আরেকবার বলবেন?</string>
     <string name="family_mode_confirm_needed">এই কাজটি করার আগে আপনার অনুমতি প্রয়োজন।</string>
     <string name="family_mode_stop">থামুন / বন্ধ করুন</string>
+
+    <!-- Phase 4: Local Memory & Reusable Skills -->
+    <string name="memory_skills_title">Memory &amp; Skills</string>
+
+    <!-- Phase 5: Autonomous Hub & Safe Browser -->
+    <string name="autonomous_hub_title">Autonomous Agent Hub</string>
+    <string name="safe_browser_title">Safe Web Browser</string>
 </resources>

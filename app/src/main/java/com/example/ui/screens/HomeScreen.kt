@@ -40,6 +40,8 @@ import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.WarningAmber
@@ -120,7 +122,16 @@ fun HomeScreen(
     onQuickTellTime: () -> Unit,
     onNavigateToApiSettings: () -> Unit,
     onNavigateToAppearanceSettings: () -> Unit,
-    onNavigateToPrivacy: () -> Unit
+    onNavigateToPrivacy: () -> Unit,
+    memoryCount: Int = 0,
+    skillCount: Int = 0,
+    hasPendingSkillProposal: Boolean = false,
+    onNavigateToMemorySkills: () -> Unit = {},
+    longTermTaskCount: Int = 0,
+    scheduledTaskCount: Int = 0,
+    proactiveSuggestionCount: Int = 0,
+    onNavigateToAutonomousHub: () -> Unit = {},
+    onNavigateToSafeBrowser: () -> Unit = {}
 ) {
     val selectedModel = GeminiLiveModel.findByIdOrCustom(settings.selectedModelId)
 
@@ -394,7 +405,7 @@ fun HomeScreen(
                             }
                         }
 
-                        AnimatedVisibility(visible = hasApiKey && !sessionState.isActive) {
+                        AnimatedVisibility(visible = !sessionState.isActive) {
                             OutlinedButton(
                                 onClick = onNavigateToLiveScreen,
                                 modifier = Modifier
@@ -568,6 +579,151 @@ fun HomeScreen(
                             subtitle = if (permissions.isAgentControlReady) "Agent Ready" else "Setup Needed",
                             onClick = onNavigateToAgentPermissions
                         )
+                    }
+                }
+
+                // Phase 4: Local Long-Term Memory & Reusable Skills Entry Card
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onNavigateToMemorySkills)
+                        .testTag("home_memory_skills_card"),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(ElectricCyan.copy(alpha = 0.16f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Psychology,
+                                contentDescription = "Memory and Skills",
+                                tint = ElectricCyan
+                            )
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "Memory & Skills (স্মৃতি ও দক্ষতা)",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                if (hasPendingSkillProposal) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = EmeraldLive.copy(alpha = 0.2f)
+                                    ) {
+                                        Text(
+                                            text = "NEW",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = EmeraldLive,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                text = if (settings.memoryEnabled) {
+                                    "On-device • $memoryCount memories • $skillCount skills"
+                                } else {
+                                    "Memory Disabled • $skillCount skills"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = "Open Memory and Skills",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // Phase 5: Autonomous Hub & Safe Browser Quick Entry Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(onClick = onNavigateToAutonomousHub)
+                            .testTag("home_autonomous_hub_card"),
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = ElectricCyan
+                            )
+                            Text(
+                                text = "Autonomous Hub",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "$longTermTaskCount tasks • $scheduledTaskCount schedules • $proactiveSuggestionCount tips",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(onClick = onNavigateToSafeBrowser)
+                            .testTag("home_safe_browser_card"),
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Language,
+                                contentDescription = null,
+                                tint = EmeraldLive
+                            )
+                            Text(
+                                text = "Safe Browser",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Grounded web view & injection guard",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
 

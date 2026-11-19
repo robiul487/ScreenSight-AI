@@ -311,6 +311,7 @@ class AgentActionExecutor(
                 )
             }
 
+            AgentActionType.GET_SCREEN_STATE,
             AgentActionType.READ_SCREEN,
             AgentActionType.VERIFY_SCREEN -> withAccessibility { service ->
                 val snap = service.captureScreenSnapshot()
@@ -319,46 +320,326 @@ class AgentActionExecutor(
                         success = false,
                         status = "SCREEN_UNREADABLE",
                         summaryEn = "The current window content is not accessible (it may be a protected or custom-rendered screen).",
-                        summaryBn = "এই স্ক্রিনের লেখা অ্যাক্সেস করা যাচ্ছে না। স্ক্রিন শেয়ার চালু থাকলে আমি দেখে বলতে পারব।"
+                        summaryBn = "এই স্ক্রিনের লেখা অ্যাক্সেস করা যাচ্ছে না। স্ক্রিন শেয়ার চালু থাকলে আমি দেখে বলতে পারব।",
+                        recoverable = true
                     )
                 } else {
+                    val expected = request.parameters["expected_outcome"].orEmpty().trim()
+                    val matchedExpected = expected.isNotEmpty() && (
+                        snap.visibleTexts.any { it.contains(expected, ignoreCase = true) } ||
+                            snap.clickableItems.any { it.contains(expected, ignoreCase = true) } ||
+                            snap.elements.any { it.bestLabel.contains(expected, ignoreCase = true) } ||
+                            snap.packageName.contains(expected, ignoreCase = true)
+                        )
                     AgentActionResult(
                         success = true,
-                        status = "SCREEN_CAPTURED",
-                        summaryEn = "Read ${snap.visibleTexts.size} visible text items on ${snap.packageName}.",
+                        status = if (expected.isNotEmpty() && matchedExpected) "VERIFIED_EXPECTED_STATE" else "SCREEN_CAPTURED",
+                        summaryEn = buildString {
+                            append("Captured ${snap.elements.size} grounded UI elements (${snap.clickableItems.size} clickable) on ${snap.packageName} [${snap.observationId}].")
+                            if (expected.isNotEmpty()) {
+                                append(if (matchedExpected) " Expected \"$expected\" found." else " Expected \"$expected\" NOT yet visible.")
+                            }
+                        },
                         summaryBn = "স্ক্রিনের তথ্য পড়ে নিয়েছি।",
+                        details = mapOf(
+                            "observation_id" to snap.observationId,
+                            "package_name" to snap.packageName,
+                            "screen_size" to "${snap.screenWidthPx}x${snap.screenHeightPx}",
+                            "elements_count" to snap.elements.size.toString(),
+                            "clickable_count" to snap.clickableItems.size.toString(),
+                            "scrollable" to snap.hasScrollableContainer.toString(),
+                            "redacted_fields" to snap.redactedSensitiveFieldCount.toString()
+                        ),
                         screenSummary = snap.toSafePromptSummary()
                     )
                 }
             }
 
-            AgentActionType.CLICK_ELEMENT -> withAccessibility { service ->
-                val target = request.parameters["target_text"] ?: request.parameters["text"].orEmpty()
-                val idx = request.parameters["occurrence_index"]?.toIntOrNull() ?: 0
-                val (ok, msg) = service.clickElementByText(target, idx)
-                delay(450L)
+            AgentActionType.GET_CURRENT_APP -> withAccessibility { service ->
                 val snap = service.captureScreenSnapshot()
+                val pkg = snap?.packageName?.ifBlank { AgentAccessibilityService.activePackageName.value }
+                    ?: AgentAccessibilityService.activePackageName.value
+                val appLabel = appLauncher.getInstalledLauncherApps()
+                    .firstOrNull { it.packageName.equals(pkg, ignoreCase = true) }
+                    ?.label
+                    ?: pkg.ifBlank { "unknown" }
                 AgentActionResult(
-                    success = ok,
-                    status = if (ok) "ELEMENT_CLICKED" else "ELEMENT_NOT_FOUND",
-                    summaryEn = msg,
-                    summaryBn = if (ok) "\"$target\"-এ ক্লিক করেছি।" else "\"$target\" বাটনটি স্ক্রিনে পাওয়া যায়নি।",
+                    success = pkg.isNotBlank(),
+                    status = if (pkg.isNotBlank()) "CURRENT_APP_FOUND" else "CURRENT_APP_UNKNOWN",
+                    summaryEn = if (pkg.isNotBlank()) "Current foreground app is $appLabel ($pkg)." else "Could not determine current foreground app.",
+                    summaryBn = if (pkg.isNotBlank()) "বর্তমানে $appLabel চালু আছে।" else "বর্তমান অ্যাপ জানা যায়নি।",
+                    details = buildMap {
+                        put("package_name", pkg)
+                        put("app_label", appLabel)
+                        if (snap != null) {
+                            put("observation_id", snap.observationId)
+                            put("elements_count", snap.elements.size.toString())
+                        }
+                    },
                     screenSummary = snap?.toSafePromptSummary()
                 )
             }
 
+            AgentActionType.CLICK_ELEMENT -> withAccessibility { service ->
+                val elementId = request.parameters["element_id"]?.trim().orEmpty()
+                val requestedObsId = request.parameters["observation_id"]?.trim()
+                val target = (request.parameters["target_text"] ?: request.parameters["text"]).orEmpty().trim()
+                val idx = request.parameters["occurrence_index"]?.toIntOrNull() ?: 0
+                val xCoord = request.parameters["x"]?.trim()?.toFloatOrNull()
+                val yCoord = request.parameters["y"]?.trim()?.toFloatOrNull()
+                val normX = request.parameters["norm_x"]?.trim()?.toFloatOrNull()
+                val normY = request.parameters["norm_y"]?.trim()?.toFloatOrNull()
+
+                val latestSnap = AgentAccessibilityService.latestSnapshot.value
+                val metrics = service.resources.displayMetrics
+
+                // Priority 1 & 2: Grounded element_id (Accessibility node -> bounding box center)
+                if (elementId.isNotEmpty()) {
+                    when (val outcome = ElementInteractionValidator.validateElementTarget(
+                        elementId = elementId,
+                        requestedObservationId = requestedObsId,
+                        latestSnapshot = latestSnap
+                    )) {
+                        is ElementInteractionValidator.ValidationOutcome.Rejected -> {
+                            return@withAccessibility AgentActionResult(
+                                success = false,
+                                status = outcome.errorCode,
+                                summaryEn = outcome.reasonEn,
+                                summaryBn = outcome.reasonBn,
+                                details = mapOf("interaction_tier" to "GROUNDED_VALIDATION_REJECTED"),
+                                screenSummary = service.captureScreenSnapshot()?.toSafePromptSummary(),
+                                recoverable = outcome.recoverable
+                            )
+                        }
+                        is ElementInteractionValidator.ValidationOutcome.ValidElement -> {
+                            val (ok, tier, msg) = service.clickGroundedElement(outcome.element)
+                            delay(450L)
+                            val postSnap = service.captureScreenSnapshot()
+                            return@withAccessibility AgentActionResult(
+                                success = ok,
+                                status = if (ok) "ELEMENT_CLICKED" else "ELEMENT_NOT_FOUND",
+                                summaryEn = msg,
+                                summaryBn = if (ok) "\"${outcome.element.bestLabel}\"-এ ক্লিক করেছি।" else "\"${outcome.element.bestLabel}\" বাটনটিতে ক্লিক করা যায়নি।",
+                                details = buildMap {
+                                    put("interaction_tier", tier)
+                                    put("element_id", elementId)
+                                    if (postSnap != null) {
+                                        put("observation_id", postSnap.observationId)
+                                        put("elements_count", postSnap.elements.size.toString())
+                                    }
+                                },
+                                screenSummary = postSnap?.toSafePromptSummary(),
+                                recoverable = !ok
+                            )
+                        }
+                        is ElementInteractionValidator.ValidationOutcome.ValidCoordinate -> {
+                            // Not returned by validateElementTarget
+                        }
+                    }
+                }
+
+                // Priority 1 (Label-based Accessibility node) -> fallback to matching grounded element bounding box
+                if (target.isNotEmpty()) {
+                    val (nodeOk, nodeMsg) = service.clickElementByText(target, idx)
+                    var ok = nodeOk
+                    var msg = nodeMsg
+                    var tier = "ACCESSIBILITY_NODE"
+
+                    if (!ok) {
+                        val freshSnap = service.captureScreenSnapshot()
+                        val groundedFallback = freshSnap?.elements?.firstOrNull { el ->
+                            el.enabled && (
+                                el.text.equals(target, ignoreCase = true) ||
+                                    el.contentDescription.equals(target, ignoreCase = true) ||
+                                    el.bestLabel.contains(target, ignoreCase = true)
+                                )
+                        }
+                        if (groundedFallback != null &&
+                            ElementInteractionValidator.validateBounds(
+                                groundedFallback.bounds,
+                                freshSnap.screenWidthPx,
+                                freshSnap.screenHeightPx
+                            )
+                        ) {
+                            val (boxOk, boxMsg) = service.performTapAtCoordinates(
+                                groundedFallback.bounds.centerX,
+                                groundedFallback.bounds.centerY
+                            )
+                            ok = boxOk
+                            msg = if (boxOk) "Tapped \"$target\" via grounded bounding-box fallback (${groundedFallback.elementId})." else boxMsg
+                            tier = "BOUNDING_BOX_COORDINATE"
+                        }
+                    }
+
+                    delay(450L)
+                    val postSnap = service.captureScreenSnapshot()
+                    return@withAccessibility AgentActionResult(
+                        success = ok,
+                        status = if (ok) "ELEMENT_CLICKED" else "ELEMENT_NOT_FOUND",
+                        summaryEn = msg,
+                        summaryBn = if (ok) "\"$target\"-এ ক্লিক করেছি।" else "\"$target\" বাটনটি স্ক্রিনে পাওয়া যায়নি।",
+                        details = buildMap {
+                            put("interaction_tier", tier)
+                            if (postSnap != null) {
+                                put("observation_id", postSnap.observationId)
+                                put("elements_count", postSnap.elements.size.toString())
+                            }
+                        },
+                        screenSummary = postSnap?.toSafePromptSummary(),
+                        recoverable = !ok
+                    )
+                }
+
+                // Priority 3: Screenshot-guided / coordinate fallback with strict bounds & freshness checks
+                when (val coordOutcome = ElementInteractionValidator.validateCoordinateTarget(
+                    x = xCoord,
+                    y = yCoord,
+                    normX = normX,
+                    normY = normY,
+                    requestedObservationId = requestedObsId,
+                    latestSnapshot = latestSnap,
+                    screenWidthPx = latestSnap?.screenWidthPx?.takeIf { it > 0 } ?: metrics.widthPixels,
+                    screenHeightPx = latestSnap?.screenHeightPx?.takeIf { it > 0 } ?: metrics.heightPixels
+                )) {
+                    is ElementInteractionValidator.ValidationOutcome.Rejected -> {
+                        AgentActionResult(
+                            success = false,
+                            status = coordOutcome.errorCode,
+                            summaryEn = coordOutcome.reasonEn,
+                            summaryBn = coordOutcome.reasonBn,
+                            details = mapOf("interaction_tier" to "COORDINATE_VALIDATION_REJECTED"),
+                            screenSummary = service.captureScreenSnapshot()?.toSafePromptSummary(),
+                            recoverable = coordOutcome.recoverable
+                        )
+                    }
+                    is ElementInteractionValidator.ValidationOutcome.ValidCoordinate -> {
+                        val (ok, msg) = service.performTapAtCoordinates(coordOutcome.tapX, coordOutcome.tapY)
+                        delay(450L)
+                        val postSnap = service.captureScreenSnapshot()
+                        val tier = if (coordOutcome.isNormalizedFallback) "NORMALIZED_COORDINATE_FALLBACK" else "PIXEL_COORDINATE_FALLBACK"
+                        AgentActionResult(
+                            success = ok,
+                            status = if (ok) "ELEMENT_CLICKED" else "TAP_GESTURE_FAILED",
+                            summaryEn = msg,
+                            summaryBn = if (ok) "স্ক্রিনের নির্দিষ্ট স্থানে ট্যাপ করেছি।" else "ট্যাপ করা যায়নি।",
+                            details = buildMap {
+                                put("interaction_tier", tier)
+                                if (postSnap != null) {
+                                    put("observation_id", postSnap.observationId)
+                                    put("elements_count", postSnap.elements.size.toString())
+                                }
+                            },
+                            screenSummary = postSnap?.toSafePromptSummary(),
+                            recoverable = !ok
+                        )
+                    }
+                    is ElementInteractionValidator.ValidationOutcome.ValidElement -> {
+                        AgentActionResult(false, "INVALID_ARGUMENTS", "Unexpected coordinate state", "সঠিক টার্গেট পাওয়া যায়নি।")
+                    }
+                }
+            }
+
             AgentActionType.LONG_PRESS -> withAccessibility { service ->
-                val target = request.parameters["target_text"].orEmpty()
-                val (ok, msg) = service.longPressElementByText(target)
-                delay(400L)
-                val snap = service.captureScreenSnapshot()
-                AgentActionResult(
-                    success = ok,
-                    status = if (ok) "ELEMENT_LONG_PRESSED" else "LONG_PRESS_FAILED",
-                    summaryEn = msg,
-                    summaryBn = if (ok) "\"$target\" চেপে ধরেছি।" else "\"$target\" চেপে ধরা যায়নি।",
-                    screenSummary = snap?.toSafePromptSummary()
-                )
+                val elementId = request.parameters["element_id"]?.trim().orEmpty()
+                val requestedObsId = request.parameters["observation_id"]?.trim()
+                val target = request.parameters["target_text"]?.trim().orEmpty()
+                val xCoord = request.parameters["x"]?.trim()?.toFloatOrNull()
+                val yCoord = request.parameters["y"]?.trim()?.toFloatOrNull()
+                val normX = request.parameters["norm_x"]?.trim()?.toFloatOrNull()
+                val normY = request.parameters["norm_y"]?.trim()?.toFloatOrNull()
+                val latestSnap = AgentAccessibilityService.latestSnapshot.value
+                val metrics = service.resources.displayMetrics
+
+                if (elementId.isNotEmpty()) {
+                    when (val outcome = ElementInteractionValidator.validateElementTarget(elementId, requestedObsId, latestSnap)) {
+                        is ElementInteractionValidator.ValidationOutcome.Rejected -> {
+                            return@withAccessibility AgentActionResult(
+                                success = false,
+                                status = outcome.errorCode,
+                                summaryEn = outcome.reasonEn,
+                                summaryBn = outcome.reasonBn,
+                                screenSummary = service.captureScreenSnapshot()?.toSafePromptSummary(),
+                                recoverable = outcome.recoverable
+                            )
+                        }
+                        is ElementInteractionValidator.ValidationOutcome.ValidElement -> {
+                            val (ok, tier, msg) = service.longPressGroundedElement(outcome.element)
+                            delay(400L)
+                            val postSnap = service.captureScreenSnapshot()
+                            return@withAccessibility AgentActionResult(
+                                success = ok,
+                                status = if (ok) "ELEMENT_LONG_PRESSED" else "LONG_PRESS_FAILED",
+                                summaryEn = msg,
+                                summaryBn = if (ok) "\"${outcome.element.bestLabel}\" চেপে ধরেছি।" else "\"${outcome.element.bestLabel}\" চেপে ধরা যায়নি।",
+                                details = buildMap {
+                                    put("interaction_tier", tier)
+                                    if (postSnap != null) put("observation_id", postSnap.observationId)
+                                },
+                                screenSummary = postSnap?.toSafePromptSummary(),
+                                recoverable = !ok
+                            )
+                        }
+                        is ElementInteractionValidator.ValidationOutcome.ValidCoordinate -> Unit
+                    }
+                }
+
+                if (target.isNotEmpty()) {
+                    val (ok, msg) = service.longPressElementByText(target)
+                    delay(400L)
+                    val snap = service.captureScreenSnapshot()
+                    return@withAccessibility AgentActionResult(
+                        success = ok,
+                        status = if (ok) "ELEMENT_LONG_PRESSED" else "LONG_PRESS_FAILED",
+                        summaryEn = msg,
+                        summaryBn = if (ok) "\"$target\" চেপে ধরেছি।" else "\"$target\" চেপে ধরা যায়নি।",
+                        details = buildMap {
+                            put("interaction_tier", "ACCESSIBILITY_NODE")
+                            if (snap != null) put("observation_id", snap.observationId)
+                        },
+                        screenSummary = snap?.toSafePromptSummary(),
+                        recoverable = !ok
+                    )
+                }
+
+                when (val coordOutcome = ElementInteractionValidator.validateCoordinateTarget(
+                    x = xCoord,
+                    y = yCoord,
+                    normX = normX,
+                    normY = normY,
+                    requestedObservationId = requestedObsId,
+                    latestSnapshot = latestSnap,
+                    screenWidthPx = latestSnap?.screenWidthPx?.takeIf { it > 0 } ?: metrics.widthPixels,
+                    screenHeightPx = latestSnap?.screenHeightPx?.takeIf { it > 0 } ?: metrics.heightPixels
+                )) {
+                    is ElementInteractionValidator.ValidationOutcome.Rejected -> AgentActionResult(
+                        success = false,
+                        status = coordOutcome.errorCode,
+                        summaryEn = coordOutcome.reasonEn,
+                        summaryBn = coordOutcome.reasonBn,
+                        screenSummary = service.captureScreenSnapshot()?.toSafePromptSummary(),
+                        recoverable = coordOutcome.recoverable
+                    )
+                    is ElementInteractionValidator.ValidationOutcome.ValidCoordinate -> {
+                        val (ok, msg) = service.performLongPressAtCoordinates(coordOutcome.tapX, coordOutcome.tapY)
+                        delay(400L)
+                        val snap = service.captureScreenSnapshot()
+                        AgentActionResult(
+                            success = ok,
+                            status = if (ok) "ELEMENT_LONG_PRESSED" else "LONG_PRESS_FAILED",
+                            summaryEn = msg,
+                            summaryBn = if (ok) "আইটেমটি চেপে ধরেছি।" else "চেপে ধরা যায়নি।",
+                            details = buildMap {
+                                put("interaction_tier", "COORDINATE_FALLBACK")
+                                if (snap != null) put("observation_id", snap.observationId)
+                            },
+                            screenSummary = snap?.toSafePromptSummary(),
+                            recoverable = !ok
+                        )
+                    }
+                    is ElementInteractionValidator.ValidationOutcome.ValidElement -> {
+                        AgentActionResult(false, "INVALID_ARGUMENTS", "Unexpected state", "সঠিক টার্গেট পাওয়া যায়নি।")
+                    }
+                }
             }
 
             AgentActionType.SCROLL -> withAccessibility { service ->
@@ -371,15 +652,71 @@ class AgentActionExecutor(
                     status = if (ok) "SCROLLED" else "SCROLL_FAILED",
                     summaryEn = msg,
                     summaryBn = if (ok) "স্ক্রিন স্ক্রল করেছি।" else "এই স্ক্রিনটি স্ক্রল করা যাচ্ছে না।",
-                    screenSummary = snap?.toSafePromptSummary()
+                    details = buildMap {
+                        if (snap != null) {
+                            put("observation_id", snap.observationId)
+                            put("elements_count", snap.elements.size.toString())
+                        }
+                    },
+                    screenSummary = snap?.toSafePromptSummary(),
+                    recoverable = !ok
+                )
+            }
+
+            AgentActionType.SWIPE -> withAccessibility { service ->
+                val dir = request.parameters["direction"] ?: "up"
+                val (ok, msg) = service.performSwipeGesture(dir)
+                delay(350L)
+                val snap = service.captureScreenSnapshot()
+                AgentActionResult(
+                    success = ok,
+                    status = if (ok) "SWIPED" else "SWIPE_FAILED",
+                    summaryEn = msg,
+                    summaryBn = if (ok) "স্ক্রিন সোয়াইপ করেছি।" else "স্ক্রিন সোয়াইপ করা যায়নি।",
+                    details = buildMap {
+                        if (snap != null) {
+                            put("observation_id", snap.observationId)
+                            put("elements_count", snap.elements.size.toString())
+                        }
+                    },
+                    screenSummary = snap?.toSafePromptSummary(),
+                    recoverable = !ok
                 )
             }
 
             AgentActionType.TYPE_TEXT -> withAccessibility { service ->
                 val text = request.parameters["text"].orEmpty()
+                val elementId = request.parameters["element_id"]?.trim().orEmpty()
+                val requestedObsId = request.parameters["observation_id"]?.trim()
                 val hint = request.parameters["field_hint"].orEmpty()
                 val submit = request.parameters["submit"]?.equals("true", ignoreCase = true) == true
-                val (ok, msg) = service.typeTextIntoField(text, hint, submit)
+
+                val (ok, msg) = if (elementId.isNotEmpty()) {
+                    when (val outcome = ElementInteractionValidator.validateElementTarget(
+                        elementId = elementId,
+                        requestedObservationId = requestedObsId,
+                        latestSnapshot = AgentAccessibilityService.latestSnapshot.value
+                    )) {
+                        is ElementInteractionValidator.ValidationOutcome.Rejected -> {
+                            return@withAccessibility AgentActionResult(
+                                success = false,
+                                status = outcome.errorCode,
+                                summaryEn = outcome.reasonEn,
+                                summaryBn = outcome.reasonBn,
+                                screenSummary = service.captureScreenSnapshot()?.toSafePromptSummary(),
+                                recoverable = outcome.recoverable
+                            )
+                        }
+                        is ElementInteractionValidator.ValidationOutcome.ValidElement -> {
+                            service.typeTextIntoGroundedElement(outcome.element, text, submit)
+                        }
+                        is ElementInteractionValidator.ValidationOutcome.ValidCoordinate -> {
+                            service.typeTextIntoField(text, hint, submit)
+                        }
+                    }
+                } else {
+                    service.typeTextIntoField(text, hint, submit)
+                }
                 delay(400L)
                 val snap = service.captureScreenSnapshot()
                 AgentActionResult(
@@ -387,7 +724,14 @@ class AgentActionExecutor(
                     status = if (ok) "TEXT_TYPED" else "TYPE_FAILED",
                     summaryEn = msg,
                     summaryBn = if (ok) "টেক্সট লিখে দিয়েছি।" else "লেখার ঘরটি স্ক্রিনে পাওয়া যায়নি।",
-                    screenSummary = snap?.toSafePromptSummary()
+                    details = buildMap {
+                        if (snap != null) {
+                            put("observation_id", snap.observationId)
+                            put("elements_count", snap.elements.size.toString())
+                        }
+                    },
+                    screenSummary = snap?.toSafePromptSummary(),
+                    recoverable = !ok
                 )
             }
 
@@ -408,10 +752,20 @@ class AgentActionExecutor(
                         success = false,
                         status = "UI_WAIT_TIMEOUT",
                         summaryEn = "Timed out waiting for accessible UI.",
-                        summaryBn = "স্ক্রিন লোড হতে বেশি সময় লাগছে।"
+                        summaryBn = "স্ক্রিন লোড হতে বেশি সময় লাগছে।",
+                        recoverable = true
                     )
                 }
             }
+
+            AgentActionType.CREATE_PLAN,
+            AgentActionType.UPDATE_PLAN,
+            AgentActionType.COMPLETE_TASK -> AgentActionResult(
+                success = true,
+                status = "PLAN_UPDATED",
+                summaryEn = "Plan state recorded.",
+                summaryBn = "কাজের পরিকল্পনা হালনাগাদ করা হয়েছে।"
+            )
 
             AgentActionType.ASK_CONFIRMATION -> AgentActionResult(
                 success = true,

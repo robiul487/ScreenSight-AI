@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -74,8 +75,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.agent.AgentExecutionState
 import com.example.agent.AgentPermissionsSnapshot
+import com.example.agent.AgentTaskPlan
 import com.example.agent.PendingConfirmation
+import com.example.data.local.checkpoint.RecoverableTaskCheckpoint
+import com.example.data.local.skill.SkillProposal
 import com.example.domain.model.LiveSessionState
 import com.example.domain.model.ScreenSightError
 import com.example.ui.theme.AmberThinking
@@ -100,10 +105,15 @@ fun FamilyEasyModeScreen(
     isUserSpeaking: Boolean,
     isAiSpeaking: Boolean,
     isAgentTaskRunning: Boolean,
+    agentExecutionState: AgentExecutionState = AgentExecutionState.IDLE,
+    activeAgentPlan: AgentTaskPlan? = null,
     statusBannerBn: String,
     pendingConfirmation: PendingConfirmation?,
     activeError: ScreenSightError?,
     permissions: AgentPermissionsSnapshot,
+    recoverableCheckpoints: List<RecoverableTaskCheckpoint> = emptyList(),
+    onResumeCheckpoint: (String) -> Unit = {},
+    onCancelCheckpoint: (String) -> Unit = {},
     onTapToTalk: () -> Unit,
     onStopEverything: () -> Unit,
     onApproveConfirmation: () -> Unit,
@@ -114,7 +124,11 @@ fun FamilyEasyModeScreen(
     onQuickTellTime: () -> Unit,
     onOpenPermissionsSetup: () -> Unit,
     onOpenApiSettings: () -> Unit,
-    onSwitchToStandardMode: () -> Unit
+    onSwitchToStandardMode: () -> Unit,
+    pendingSkillProposal: SkillProposal? = null,
+    onApproveSkillProposal: (String?) -> Unit = {},
+    onDismissSkillProposal: () -> Unit = {},
+    onOpenMemorySkills: () -> Unit = {}
 ) {
     BackHandler(onBack = onSwitchToStandardMode)
 
@@ -130,8 +144,16 @@ fun FamilyEasyModeScreen(
     )
 
     val liveStatusBangla = when {
-        pendingConfirmation != null -> stringResource(R.string.family_mode_confirm_needed)
-        isAgentTaskRunning -> stringResource(R.string.family_mode_working)
+        pendingConfirmation != null || agentExecutionState == AgentExecutionState.WAITING_FOR_USER ->
+            stringResource(R.string.family_mode_confirm_needed)
+        agentExecutionState == AgentExecutionState.RECOVERING ->
+            "আমি এই ধাপে আটকে গেছি, আবার চেষ্টা করছি।"
+        agentExecutionState == AgentExecutionState.PLANNING ->
+            "পরিকল্পনা করছি..."
+        agentExecutionState == AgentExecutionState.OBSERVING ->
+            "স্ক্রিন দেখে যাচাই করছি..."
+        isAgentTaskRunning || agentExecutionState == AgentExecutionState.EXECUTING ->
+            stringResource(R.string.family_mode_working)
         sessionState == LiveSessionState.CONNECTING ||
             sessionState == LiveSessionState.RECONNECTING -> "সংযোগ হচ্ছে, একটু অপেক্ষা করুন..."
         sessionState == LiveSessionState.SPEAKING || isAiSpeaking -> "সহকারী কথা বলছে..."
@@ -144,9 +166,11 @@ fun FamilyEasyModeScreen(
     }
 
     val orbColor = when {
-        pendingConfirmation != null -> AmberThinking
-        activeError != null -> CrimsonAlert
-        isAgentTaskRunning -> ElectricCyan
+        pendingConfirmation != null ||
+            agentExecutionState == AgentExecutionState.WAITING_FOR_USER ||
+            agentExecutionState == AgentExecutionState.RECOVERING -> AmberThinking
+        activeError != null || agentExecutionState == AgentExecutionState.FAILED -> CrimsonAlert
+        isAgentTaskRunning || agentExecutionState.isActive -> ElectricCyan
         sessionState == LiveSessionState.SPEAKING || isAiSpeaking -> IndigoGlow
         sessionState.isActive && !isMicMuted -> EmeraldLive
         sessionState.isActive && isMicMuted -> AmberThinking
@@ -356,6 +380,122 @@ fun FamilyEasyModeScreen(
                     }
                 }
 
+                // Simple Bangla Incomplete Task Prompt (only shown after restart if safe checkpoint exists)
+                AnimatedVisibility(visible = recoverableCheckpoints.isNotEmpty() && pendingConfirmation == null) {
+                    recoverableCheckpoints.firstOrNull()?.let { checkpoint ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("family_recoverable_checkpoint_card"),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = IndigoGlow.copy(alpha = 0.18f))
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(
+                                    text = "আগের একটি কাজ অসমাপ্ত আছে",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = ElectricCyan
+                                )
+                                Text(
+                                    text = checkpoint.sanitizedRequest,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Button(
+                                        onClick = { onResumeCheckpoint(checkpoint.taskId) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(50.dp),
+                                        shape = RoundedCornerShape(14.dp)
+                                    ) {
+                                        Text("আবার শুরু", fontWeight = FontWeight.Bold)
+                                    }
+                                    OutlinedButton(
+                                        onClick = { onCancelCheckpoint(checkpoint.taskId) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(50.dp),
+                                        shape = RoundedCornerShape(14.dp)
+                                    ) {
+                                        Text("বাতিল", fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Simple Bangla Learned Skill Approval Card (only shown after safe multi-step task completes)
+                AnimatedVisibility(visible = pendingSkillProposal != null && pendingConfirmation == null) {
+                    pendingSkillProposal?.let { proposal ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("family_skill_proposal_card"),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = EmeraldLive.copy(alpha = 0.14f))
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(
+                                    text = "নতুন কাজের ধাপ মনে রাখব?",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EmeraldLive
+                                )
+                                Text(
+                                    text = "${proposal.suggestedName} (${proposal.executionSteps.size}টি ধাপ)",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Button(
+                                        onClick = { onApproveSkillProposal(null) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(50.dp)
+                                            .testTag("family_approve_skill_button"),
+                                        shape = RoundedCornerShape(14.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = EmeraldLive,
+                                            contentColor = Color(0xFF070B14)
+                                        )
+                                    ) {
+                                        Text("হ্যাঁ, রাখুন", fontWeight = FontWeight.Bold)
+                                    }
+                                    OutlinedButton(
+                                        onClick = onDismissSkillProposal,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(50.dp)
+                                            .testTag("family_dismiss_skill_button"),
+                                        shape = RoundedCornerShape(14.dp)
+                                    ) {
+                                        Text("না, বাদ দিন", fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Main High-Contrast Bangla Instruction
                 Text(
                     text = stringResource(R.string.family_mode_prompt),
@@ -434,14 +574,28 @@ fun FamilyEasyModeScreen(
                     color = MaterialTheme.colorScheme.surface,
                     tonalElevation = 3.dp
                 ) {
-                    Text(
-                        text = liveStatusBangla,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = orbColor,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp)
-                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = liveStatusBangla,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = orbColor,
+                            textAlign = TextAlign.Center
+                        )
+                        if (activeAgentPlan != null && activeAgentPlan.steps.size > 1) {
+                            Text(
+                                text = "ধাপ ${activeAgentPlan.completedStepsCount}/${activeAgentPlan.steps.size}",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
 
                 // Obvious Red Stop / Cancel Control when session or task is active
@@ -521,6 +675,26 @@ fun FamilyEasyModeScreen(
                             label = "সময় বলুন",
                             accent = AmberThinking,
                             onClick = onQuickTellTime
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = onOpenMemorySkills,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                            .testTag("family_open_memory_skills_button"),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Psychology,
+                            contentDescription = "স্মৃতি ও দক্ষতা",
+                            tint = ElectricCyan
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "স্মৃতি ও দক্ষতা (Memory & Skills)",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }

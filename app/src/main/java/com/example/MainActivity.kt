@@ -39,10 +39,13 @@ import com.example.ui.ScreenSightViewModel
 import com.example.ui.screens.AgentPermissionsScreen
 import com.example.ui.screens.ApiSettingsScreen
 import com.example.ui.screens.AppearanceSettingsScreen
+import com.example.ui.screens.AutonomousHubScreen
 import com.example.ui.screens.FamilyEasyModeScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.LiveAssistantScreen
+import com.example.ui.screens.MemorySkillsScreen
 import com.example.ui.screens.PrivacySecurityScreen
+import com.example.ui.screens.SafeBrowserScreen
 import com.example.ui.screens.TrustedContactsScreen
 import com.example.ui.theme.ScreenSightTheme
 
@@ -52,6 +55,9 @@ object ScreenRoutes {
     const val ROUTE_FAMILY_EASY_MODE = "family_easy_mode"
     const val ROUTE_AGENT_PERMISSIONS = "agent_permissions"
     const val ROUTE_TRUSTED_CONTACTS = "trusted_contacts"
+    const val ROUTE_MEMORY_SKILLS = "memory_skills"
+    const val ROUTE_AUTONOMOUS_HUB = "autonomous_hub"
+    const val ROUTE_SAFE_BROWSER = "safe_browser"
     const val ROUTE_API_SETTINGS = "api_settings"
     const val ROUTE_APPEARANCE_SETTINGS = "appearance_settings"
     const val ROUTE_PRIVACY_SECURITY = "privacy_security"
@@ -114,13 +120,41 @@ fun ScreenSightAppNavHost(
     val validationState by viewModel.apiValidationState.collectAsStateWithLifecycle()
     val showPrivacyDialog by viewModel.showFirstSessionPrivacyDialog.collectAsStateWithLifecycle()
 
-    // Android AI Agent State
+    // Android AI Agent State (Phase 1 + Phase 2 + Phase 3 Reliability & Grounding)
+    val agentExecutionState by viewModel.agentExecutionState.collectAsStateWithLifecycle()
+    val activeAgentPlan by viewModel.activeAgentPlan.collectAsStateWithLifecycle()
     val agentTaskSteps by viewModel.agentTaskSteps.collectAsStateWithLifecycle()
+    val agentTaskLogs by viewModel.agentTaskLogs.collectAsStateWithLifecycle()
     val isAgentTaskRunning by viewModel.isAgentTaskRunning.collectAsStateWithLifecycle()
     val pendingConfirmation by viewModel.pendingConfirmation.collectAsStateWithLifecycle()
     val agentStatusBannerBn by viewModel.agentStatusBannerBn.collectAsStateWithLifecycle()
+    val latestScreenSnapshot by viewModel.latestScreenSnapshot.collectAsStateWithLifecycle()
+    val activeForegroundPackage by viewModel.activeForegroundPackage.collectAsStateWithLifecycle()
+    val lastActionVerification by viewModel.lastActionVerification.collectAsStateWithLifecycle()
+    val recoverableCheckpoints by viewModel.recoverableCheckpoints.collectAsStateWithLifecycle()
+    val deviceTestRecords by viewModel.deviceTestRecords.collectAsStateWithLifecycle()
+    val activeHarnessScenario by viewModel.activeHarnessScenario.collectAsStateWithLifecycle()
     val permissionsSnapshot by viewModel.permissionsSnapshot.collectAsStateWithLifecycle()
     val trustedContacts by viewModel.trustedContacts.collectAsStateWithLifecycle()
+
+    // Phase 4: Local Long-Term Memory & Reusable Skills State
+    val memories by viewModel.memories.collectAsStateWithLifecycle()
+    val skills by viewModel.skills.collectAsStateWithLifecycle()
+    val pendingSkillProposal by viewModel.pendingSkillProposal.collectAsStateWithLifecycle()
+    val activeSkillId by viewModel.activeSkillId.collectAsStateWithLifecycle()
+    val memoryFeedbackMessage by viewModel.memoryFeedbackMessage.collectAsStateWithLifecycle()
+
+    // Phase 5: Autonomous Orchestration, Scheduling, Proactive Suggestions, Tools & Reflection
+    val longTermTasks by viewModel.longTermTasks.collectAsStateWithLifecycle()
+    val scheduledTasks by viewModel.scheduledTasks.collectAsStateWithLifecycle()
+    val proactiveSuggestions by viewModel.proactiveSuggestions.collectAsStateWithLifecycle()
+    val discoveredTools by viewModel.discoveredTools.collectAsStateWithLifecycle()
+    val toolReliabilityMetrics by viewModel.toolReliabilityMetrics.collectAsStateWithLifecycle()
+    val toolExecutionHistory by viewModel.toolExecutionHistory.collectAsStateWithLifecycle()
+    val latestReflectionReport by viewModel.latestReflectionReport.collectAsStateWithLifecycle()
+    val skillImprovementProposals by viewModel.skillImprovementProposals.collectAsStateWithLifecycle()
+    val lastMultiAgentContext by viewModel.lastMultiAgentContext.collectAsStateWithLifecycle()
+    val autonomousFeedbackMessage by viewModel.autonomousFeedbackMessage.collectAsStateWithLifecycle()
 
     // Always re-check real OS permissions (especially Accessibility & Overlay) when user returns to app
     DisposableEffect(lifecycleOwner) {
@@ -306,6 +340,28 @@ fun ScreenSightAppNavHost(
                     navController.navigate(ScreenRoutes.ROUTE_PRIVACY_SECURITY) {
                         launchSingleTop = true
                     }
+                },
+                memoryCount = memories.size,
+                skillCount = skills.size,
+                hasPendingSkillProposal = pendingSkillProposal != null,
+                onNavigateToMemorySkills = {
+                    navController.navigate(ScreenRoutes.ROUTE_MEMORY_SKILLS) {
+                        launchSingleTop = true
+                    }
+                },
+                longTermTaskCount = longTermTasks.size,
+                scheduledTaskCount = scheduledTasks.size,
+                proactiveSuggestionCount = proactiveSuggestions.size,
+                onNavigateToAutonomousHub = {
+                    viewModel.refreshDynamicToolsAndMetrics()
+                    navController.navigate(ScreenRoutes.ROUTE_AUTONOMOUS_HUB) {
+                        launchSingleTop = true
+                    }
+                },
+                onNavigateToSafeBrowser = {
+                    navController.navigate(ScreenRoutes.ROUTE_SAFE_BROWSER) {
+                        launchSingleTop = true
+                    }
                 }
             )
         }
@@ -318,10 +374,15 @@ fun ScreenSightAppNavHost(
                 isUserSpeaking = isUserSpeaking,
                 isAiSpeaking = isAiSpeaking,
                 isAgentTaskRunning = isAgentTaskRunning,
+                agentExecutionState = agentExecutionState,
+                activeAgentPlan = activeAgentPlan,
                 statusBannerBn = agentStatusBannerBn,
                 pendingConfirmation = pendingConfirmation,
                 activeError = activeError,
                 permissions = permissionsSnapshot,
+                recoverableCheckpoints = recoverableCheckpoints,
+                onResumeCheckpoint = { viewModel.resumeRecoverableCheckpoint(it) },
+                onCancelCheckpoint = { viewModel.cancelRecoverableCheckpoint(it) },
                 onTapToTalk = {
                     if (!hasApiKey) {
                         navController.navigate(ScreenRoutes.ROUTE_API_SETTINGS) { launchSingleTop = true }
@@ -363,7 +424,88 @@ fun ScreenSightAppNavHost(
                 onSwitchToStandardMode = {
                     viewModel.updateAgentMode(AgentMode.STANDARD_AGENT)
                     navController.popBackStack(ScreenRoutes.ROUTE_HOME, inclusive = false)
+                },
+                pendingSkillProposal = pendingSkillProposal,
+                onApproveSkillProposal = { viewModel.approvePendingSkillProposal(it) },
+                onDismissSkillProposal = { viewModel.dismissPendingSkillProposal() },
+                onOpenMemorySkills = {
+                    navController.navigate(ScreenRoutes.ROUTE_MEMORY_SKILLS) {
+                        launchSingleTop = true
+                    }
                 }
+            )
+        }
+
+        composable(ScreenRoutes.ROUTE_MEMORY_SKILLS) {
+            MemorySkillsScreen(
+                memoryEnabled = settings.memoryEnabled,
+                memories = memories,
+                skills = skills,
+                pendingSkillProposal = pendingSkillProposal,
+                activeSkillId = activeSkillId,
+                isAgentTaskRunning = isAgentTaskRunning,
+                feedbackMessage = memoryFeedbackMessage,
+                onToggleMemoryEnabled = { viewModel.updateMemoryEnabled(it) },
+                onAddMemory = { cat, k, v, exp -> viewModel.addLocalMemory(cat, k, v, exp) },
+                onEditMemory = { id, cat, k, v, exp -> viewModel.editLocalMemory(id, cat, k, v, exp) },
+                onDeleteMemory = { viewModel.deleteLocalMemory(it) },
+                onClearAllMemories = { viewModel.clearAllLocalMemories() },
+                onSetSkillEnabled = { id, enabled -> viewModel.setSkillEnabled(id, enabled) },
+                onRunSkill = { id, params -> viewModel.runSkill(id, params) },
+                onStopActiveSkill = { viewModel.cancelActiveAgentTask() },
+                onSaveOrEditSkill = { viewModel.saveOrUpdateSkill(it) },
+                onDeleteSkill = { viewModel.deleteSkill(it) },
+                onApproveSkillProposal = { viewModel.approvePendingSkillProposal(it) },
+                onDismissSkillProposal = { viewModel.dismissPendingSkillProposal() },
+                onDismissFeedback = { viewModel.clearMemoryFeedback() },
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(ScreenRoutes.ROUTE_AUTONOMOUS_HUB) {
+            AutonomousHubScreen(
+                longTermTasks = longTermTasks,
+                scheduledTasks = scheduledTasks,
+                proactiveSuggestionsEnabled = settings.proactiveSuggestionsEnabled,
+                proactiveSuggestions = proactiveSuggestions,
+                discoveredTools = discoveredTools,
+                toolReliabilityMetrics = toolReliabilityMetrics,
+                toolExecutionHistory = toolExecutionHistory,
+                latestReflectionReport = latestReflectionReport,
+                skillImprovementProposals = skillImprovementProposals,
+                lastMultiAgentContext = lastMultiAgentContext,
+                feedbackMessage = autonomousFeedbackMessage,
+                onCreateGoalTask = { viewModel.createAndRunMultiStageGoal(it) },
+                onResumeTask = { viewModel.resumeLongTermTask(it) },
+                onPauseTask = { viewModel.pauseLongTermTask(it) },
+                onRetryTask = { viewModel.retryLongTermTask(it) },
+                onCancelTask = { viewModel.cancelLongTermTask(it) },
+                onDeleteTask = { viewModel.deleteLongTermTask(it) },
+                onCreateSchedule = { title, action, target, rec, h, m, iv, approved, a11y ->
+                    viewModel.createSchedule(title, action, target, rec, h, m, iv, approved, a11y)
+                },
+                onToggleSchedule = { id, enabled -> viewModel.toggleScheduleEnabled(id, enabled) },
+                onDeleteSchedule = { viewModel.deleteSchedule(it) },
+                onCancelAllBackgroundWork = { viewModel.cancelAllBackgroundWork() },
+                onToggleProactiveEnabled = { viewModel.updateProactiveSuggestionsEnabled(it) },
+                onRunProactiveSuggestion = { viewModel.runProactiveSuggestion(it) },
+                onDismissProactiveSuggestion = { viewModel.dismissProactiveSuggestion(it) },
+                onRefreshToolsAndMetrics = { viewModel.refreshDynamicToolsAndMetrics() },
+                onDismissImprovementProposal = { viewModel.dismissSkillImprovementProposal(it) },
+                onOpenSafeBrowser = {
+                    navController.navigate(ScreenRoutes.ROUTE_SAFE_BROWSER) {
+                        launchSingleTop = true
+                    }
+                },
+                onDismissFeedback = { viewModel.clearAutonomousFeedback() },
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(ScreenRoutes.ROUTE_SAFE_BROWSER) {
+            SafeBrowserScreen(
+                webAutomationManager = viewModel.safeWebAutomationManager,
+                onBack = { navController.popBackStack() }
             )
         }
 
@@ -423,12 +565,28 @@ fun ScreenSightAppNavHost(
                 connectionQuality = connectionQuality,
                 transcript = transcript,
                 activeError = activeError,
+                agentExecutionState = agentExecutionState,
+                activeAgentPlan = activeAgentPlan,
                 agentTaskSteps = agentTaskSteps,
+                agentTaskLogs = agentTaskLogs,
                 isAgentTaskRunning = isAgentTaskRunning,
                 pendingConfirmation = pendingConfirmation,
+                isAccessibilityConnected = permissionsSnapshot.isAgentControlReady,
+                activeForegroundPackage = activeForegroundPackage,
+                latestScreenSnapshot = latestScreenSnapshot,
+                lastActionVerification = lastActionVerification,
+                recoverableCheckpoints = recoverableCheckpoints,
+                deviceTestRecords = deviceTestRecords,
+                activeHarnessScenario = activeHarnessScenario,
+                onResumeCheckpoint = { viewModel.resumeRecoverableCheckpoint(it) },
+                onCancelCheckpoint = { viewModel.cancelRecoverableCheckpoint(it) },
+                onRefreshScreenSnapshot = { viewModel.refreshScreenSnapshot() },
+                onSelectHarnessScenario = { viewModel.selectHarnessScenario(it) },
+                onClearHarnessRecords = { viewModel.clearHarnessRecords() },
                 onApproveConfirmation = { viewModel.approvePendingConfirmation() },
                 onRejectConfirmation = { viewModel.rejectPendingConfirmation() },
                 onStopAgentTask = { viewModel.cancelActiveAgentTask() },
+                onClearAgentLogs = { viewModel.clearAgentTaskLogs() },
                 onBack = {
                     navController.popBackStack()
                 },

@@ -198,7 +198,9 @@ data class AppSettings(
     val lastSessionSummary: String = "No session recorded yet",
     val agentMode: AgentMode = AgentMode.STANDARD_AGENT,
     val agentToolsEnabled: Boolean = true,
-    val lastAgentTaskSummary: String = "No agent task recorded yet"
+    val lastAgentTaskSummary: String = "No agent task recorded yet",
+    val memoryEnabled: Boolean = true,
+    val proactiveSuggestionsEnabled: Boolean = true
 ) {
     companion object {
         const val DEFAULT_SYSTEM_INSTRUCTION = """You are ScreenSight AI, a real-time visual assistant.

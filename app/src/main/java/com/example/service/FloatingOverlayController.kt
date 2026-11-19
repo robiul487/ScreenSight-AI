@@ -19,6 +19,7 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.example.MainActivity
+import com.example.agent.AgentExecutionState
 import com.example.domain.model.LiveSessionState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -64,6 +65,7 @@ class FloatingOverlayController(
     private var isMicMutedState = false
     private var isAgentWorkingState = false
     private var hasPendingConfirmationState = false
+    private var latestAgentState = AgentExecutionState.IDLE
     private var latestSessionState = LiveSessionState.IDLE
     private var stateJob: Job? = null
 
@@ -335,6 +337,12 @@ class FloatingOverlayController(
                     }
                 }
                 launch {
+                    coordinator.executionState.collectLatest { execState ->
+                        latestAgentState = execState
+                        refreshStatusUi()
+                    }
+                }
+                launch {
                     coordinator.pendingConfirmation.collectLatest { pending ->
                         hasPendingConfirmationState = pending != null
                         refreshStatusUi()
@@ -347,8 +355,13 @@ class FloatingOverlayController(
     private fun refreshStatusUi() {
         val arrow = if (isExpanded) "▴" else "▾"
         val label = when {
-            hasPendingConfirmationState -> "Confirm Action $arrow"
-            isAgentWorkingState -> "Agent Working... $arrow"
+            hasPendingConfirmationState || latestAgentState == AgentExecutionState.WAITING_FOR_USER ->
+                "Confirm Action $arrow"
+            latestAgentState == AgentExecutionState.PLANNING -> "Planning... $arrow"
+            latestAgentState == AgentExecutionState.OBSERVING -> "Observing... $arrow"
+            latestAgentState == AgentExecutionState.RECOVERING -> "Recovering... $arrow"
+            latestAgentState == AgentExecutionState.EXECUTING || isAgentWorkingState ->
+                "Agent Working... $arrow"
             isSharingScreenState && isCapturePausedState -> "Screen Paused $arrow"
             latestSessionState == LiveSessionState.SPEAKING -> "Gemini Speaking $arrow"
             latestSessionState == LiveSessionState.THINKING -> "Thinking... $arrow"
@@ -360,8 +373,13 @@ class FloatingOverlayController(
 
         val dotColor = when {
             latestSessionState == LiveSessionState.ERROR -> "#EF4444"
-            hasPendingConfirmationState -> "#F59E0B"
-            isAgentWorkingState -> "#38BDF8"
+            hasPendingConfirmationState ||
+                latestAgentState == AgentExecutionState.WAITING_FOR_USER ||
+                latestAgentState == AgentExecutionState.RECOVERING -> "#F59E0B"
+            latestAgentState == AgentExecutionState.PLANNING ||
+                latestAgentState == AgentExecutionState.EXECUTING ||
+                latestAgentState == AgentExecutionState.OBSERVING ||
+                isAgentWorkingState -> "#38BDF8"
             latestSessionState == LiveSessionState.SPEAKING -> "#818CF8"
             latestSessionState == LiveSessionState.RECONNECTING ||
                 latestSessionState == LiveSessionState.THINKING -> "#F59E0B"

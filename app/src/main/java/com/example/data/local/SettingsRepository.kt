@@ -58,7 +58,9 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             lastSessionSummary = prefs[KEY_LAST_SESSION_SUMMARY] ?: "No session recorded yet",
             agentMode = agentMode,
             agentToolsEnabled = prefs[KEY_AGENT_TOOLS_ENABLED] ?: true,
-            lastAgentTaskSummary = prefs[KEY_LAST_AGENT_TASK_SUMMARY] ?: "No agent task recorded yet"
+            lastAgentTaskSummary = prefs[KEY_LAST_AGENT_TASK_SUMMARY] ?: "No agent task recorded yet",
+            memoryEnabled = prefs[KEY_MEMORY_ENABLED] ?: true,
+            proactiveSuggestionsEnabled = prefs[KEY_PROACTIVE_SUGGESTIONS_ENABLED] ?: true
         )
     }
 
@@ -124,6 +126,14 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         dataStore.edit { it[KEY_LAST_AGENT_TASK_SUMMARY] = summary }
     }
 
+    suspend fun updateMemoryEnabled(enabled: Boolean) {
+        dataStore.edit { it[KEY_MEMORY_ENABLED] = enabled }
+    }
+
+    suspend fun updateProactiveSuggestionsEnabled(enabled: Boolean) {
+        dataStore.edit { it[KEY_PROACTIVE_SUGGESTIONS_ENABLED] = enabled }
+    }
+
     companion object {
         private val KEY_SELECTED_MODEL = stringPreferencesKey("selected_model_id")
         private val KEY_SELECTED_VOICE = stringPreferencesKey("selected_voice_name")
@@ -140,5 +150,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         private val KEY_AGENT_MODE = stringPreferencesKey("agent_mode")
         private val KEY_AGENT_TOOLS_ENABLED = booleanPreferencesKey("agent_tools_enabled")
         private val KEY_LAST_AGENT_TASK_SUMMARY = stringPreferencesKey("last_agent_task_summary")
+        private val KEY_MEMORY_ENABLED = booleanPreferencesKey("memory_enabled")
+        private val KEY_PROACTIVE_SUGGESTIONS_ENABLED = booleanPreferencesKey("proactive_suggestions_enabled")
     }
 }

@@ -304,4 +304,36 @@ class ExampleRobolectricTest {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithText("Theme & Display").assertIsDisplayed()
     }
+
+    @Test
+    @Config(qualifiers = "w411dp-h891dp")
+    fun `live assistant console displays Phase 2 agent execution state badge and task logs tab`() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<ScreenSightApp>()
+        val coordinator = app.container.agentCoordinator
+        coordinator.clearTaskHistory()
+
+        // Trigger a quick deterministic action so state, step history, and sanitized logs populate
+        coordinator.onUserRequestReceived("What time is it?")
+        coordinator.executeDirectQuickAction(
+            AgentActionRequest(actionType = AgentActionType.GET_DATE_TIME),
+            isGeminiAudioActive = true
+        )
+        delay(120L)
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("open_assistant_console_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("agent_execution_state_badge").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("console_tab_agent_activity").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("agent_activity_list").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("console_tab_task_logs").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("agent_task_logs_list").assertIsDisplayed()
+
+        assertTrue(coordinator.taskLogger.recentEntries.value.isNotEmpty())
+        assertTrue(coordinator.taskSteps.value.isNotEmpty())
+    }
 }

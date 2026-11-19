@@ -11,6 +11,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +31,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -63,6 +65,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconToggleButtonColors
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -89,9 +92,16 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.example.agent.AgentExecutionState
 import com.example.agent.AgentStepStatus
+import com.example.agent.AgentTaskLogger
+import com.example.agent.AgentTaskPlan
 import com.example.agent.AgentTaskStep
+import com.example.agent.LastActionVerification
 import com.example.agent.PendingConfirmation
+import com.example.agent.PhysicalDeviceTestHarness
+import com.example.agent.ScreenUiSnapshot
+import com.example.data.local.checkpoint.RecoverableTaskCheckpoint
 import com.example.domain.model.ConnectionQuality
 import com.example.domain.model.LiveSessionState
 import com.example.domain.model.MessageSender
@@ -131,12 +141,28 @@ fun LiveAssistantScreen(
     connectionQuality: ConnectionQuality,
     transcript: List<TranscriptMessage>,
     activeError: ScreenSightError?,
+    agentExecutionState: AgentExecutionState = AgentExecutionState.IDLE,
+    activeAgentPlan: AgentTaskPlan? = null,
     agentTaskSteps: List<AgentTaskStep> = emptyList(),
+    agentTaskLogs: List<AgentTaskLogger.TaskLogEntry> = emptyList(),
     isAgentTaskRunning: Boolean = false,
     pendingConfirmation: PendingConfirmation? = null,
+    isAccessibilityConnected: Boolean = false,
+    activeForegroundPackage: String = "",
+    latestScreenSnapshot: ScreenUiSnapshot? = null,
+    lastActionVerification: LastActionVerification? = null,
+    recoverableCheckpoints: List<RecoverableTaskCheckpoint> = emptyList(),
+    deviceTestRecords: List<PhysicalDeviceTestHarness.DeviceTestRunRecord> = emptyList(),
+    activeHarnessScenario: PhysicalDeviceTestHarness.DeviceTestScenario? = null,
+    onResumeCheckpoint: (String) -> Unit = {},
+    onCancelCheckpoint: (String) -> Unit = {},
+    onRefreshScreenSnapshot: () -> Unit = {},
+    onSelectHarnessScenario: (PhysicalDeviceTestHarness.DeviceTestScenario?) -> Unit = {},
+    onClearHarnessRecords: () -> Unit = {},
     onApproveConfirmation: () -> Unit = {},
     onRejectConfirmation: () -> Unit = {},
     onStopAgentTask: () -> Unit = {},
+    onClearAgentLogs: () -> Unit = {},
     onBack: () -> Unit,
     onStartSession: () -> Unit,
     onRequestShareScreen: () -> Unit,
@@ -152,19 +178,27 @@ fun LiveAssistantScreen(
     BackHandler(onBack = onBack)
 
     var messageInput by rememberSaveable { mutableStateOf("") }
-    var showAgentActivityTab by rememberSaveable { mutableStateOf(false) }
+    // 0 = Transcript, 1 = Agent Activity, 2 = Task Logs, 3 = Phase 3 Diagnostics
+    var selectedConsoleTab by rememberSaveable { mutableStateOf(0) }
     val listState = rememberLazyListState()
     val agentListState = rememberLazyListState()
+    val logListState = rememberLazyListState()
 
     LaunchedEffect(transcript.size) {
-        if (transcript.isNotEmpty() && !showAgentActivityTab) {
+        if (transcript.isNotEmpty() && selectedConsoleTab == 0) {
             listState.animateScrollToItem(transcript.size - 1)
         }
     }
 
     LaunchedEffect(agentTaskSteps.size) {
-        if (agentTaskSteps.isNotEmpty() && showAgentActivityTab) {
+        if (agentTaskSteps.isNotEmpty() && selectedConsoleTab == 1) {
             agentListState.animateScrollToItem(agentTaskSteps.size - 1)
+        }
+    }
+
+    LaunchedEffect(agentTaskLogs.size) {
+        if (agentTaskLogs.isNotEmpty() && selectedConsoleTab == 2) {
+            logListState.animateScrollToItem(agentTaskLogs.size - 1)
         }
     }
 
@@ -240,7 +274,7 @@ fun LiveAssistantScreen(
                     .widthIn(max = 650.dp)
                     .fillMaxSize()
                     .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // Error Banner if activeError is non-null
                 AnimatedVisibility(visible = activeError != null) {
@@ -330,25 +364,65 @@ fun LiveAssistantScreen(
                     }
                 }
 
-                // Console View Switcher: Transcript vs Agent Activity + Stop Task Button
+                // Phase 3 Recoverable Task Checkpoint Banner (shown after restart when incomplete task exists)
+                AnimatedVisibility(visible = recoverableCheckpoints.isNotEmpty() && pendingConfirmation == null) {
+                    recoverableCheckpoints.firstOrNull()?.let { checkpoint ->
+                        RecoverableCheckpointBanner(
+                            checkpoint = checkpoint,
+                            onResume = { onResumeCheckpoint(checkpoint.taskId) },
+                            onCancel = { onCancelCheckpoint(checkpoint.taskId) }
+                        )
+                    }
+                }
+
+                // Compact Autonomous Agent Execution State & Multi-Step Plan Strip
+                AnimatedVisibility(
+                    visible = activeAgentPlan != null || agentExecutionState != AgentExecutionState.IDLE
+                ) {
+                    AgentPlanStatusCard(
+                        executionState = agentExecutionState,
+                        activePlan = activeAgentPlan
+                    )
+                }
+
+                // Console View Switcher: Transcript | Agent Activity | Task Logs | Diagnostics + Stop Task Button
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    FilterChip(
-                        selected = !showAgentActivityTab,
-                        onClick = { showAgentActivityTab = false },
-                        label = { Text("Transcript") },
-                        modifier = Modifier.testTag("console_tab_transcript")
-                    )
-                    FilterChip(
-                        selected = showAgentActivityTab,
-                        onClick = { showAgentActivityTab = true },
-                        label = { Text("Agent Activity (${agentTaskSteps.size})") },
-                        modifier = Modifier.testTag("console_tab_agent_activity")
-                    )
-                    Spacer(modifier = Modifier.weight(1f))
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FilterChip(
+                            selected = selectedConsoleTab == 0,
+                            onClick = { selectedConsoleTab = 0 },
+                            label = { Text("Transcript") },
+                            modifier = Modifier.testTag("console_tab_transcript")
+                        )
+                        FilterChip(
+                            selected = selectedConsoleTab == 1,
+                            onClick = { selectedConsoleTab = 1 },
+                            label = { Text("Agent (${agentTaskSteps.size})") },
+                            modifier = Modifier.testTag("console_tab_agent_activity")
+                        )
+                        FilterChip(
+                            selected = selectedConsoleTab == 2,
+                            onClick = { selectedConsoleTab = 2 },
+                            label = { Text("Logs (${agentTaskLogs.size})") },
+                            modifier = Modifier.testTag("console_tab_task_logs")
+                        )
+                        FilterChip(
+                            selected = selectedConsoleTab == 3,
+                            onClick = { selectedConsoleTab = 3 },
+                            label = { Text("Diagnostics") },
+                            modifier = Modifier.testTag("console_tab_diagnostics")
+                        )
+                    }
                     if (isAgentTaskRunning) {
                         Button(
                             onClick = onStopAgentTask,
@@ -362,12 +436,26 @@ fun LiveAssistantScreen(
                         ) {
                             Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Stop Task", style = MaterialTheme.typography.labelMedium)
+                            Text("Stop", style = MaterialTheme.typography.labelMedium)
+                        }
+                    } else if (selectedConsoleTab == 2 && agentTaskLogs.isNotEmpty()) {
+                        TextButton(
+                            onClick = onClearAgentLogs,
+                            modifier = Modifier.testTag("clear_agent_logs_button")
+                        ) {
+                            Text("Clear", style = MaterialTheme.typography.labelMedium)
+                        }
+                    } else if (selectedConsoleTab == 3) {
+                        TextButton(
+                            onClick = onRefreshScreenSnapshot,
+                            modifier = Modifier.testTag("refresh_diagnostics_button")
+                        ) {
+                            Text("Refresh", style = MaterialTheme.typography.labelMedium)
                         }
                     }
                 }
 
-                // Conversation Transcript OR Agent Activity Step Log Area
+                // Conversation Transcript OR Agent Activity Step Log OR Sanitized Task Logs Area
                 Card(
                     modifier = Modifier
                         .weight(1f)
@@ -378,8 +466,98 @@ fun LiveAssistantScreen(
                         containerColor = MaterialTheme.colorScheme.surface
                     )
                 ) {
-                    if (showAgentActivityTab) {
-                        if (agentTaskSteps.isEmpty()) {
+                    when (selectedConsoleTab) {
+                        1 -> {
+                            if (agentTaskSteps.isEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(24.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.SmartToy,
+                                            contentDescription = null,
+                                            tint = ElectricCyan.copy(alpha = 0.75f),
+                                            modifier = Modifier.size(40.dp)
+                                        )
+                                        Text(
+                                            text = "No Android Agent actions executed yet.\nAsk ScreenSight AI to open apps, search YouTube, read the screen, set an alarm, or call a trusted contact.",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            } else {
+                                LazyColumn(
+                                    state = agentListState,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .testTag("agent_activity_list"),
+                                    contentPadding = PaddingValues(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    items(agentTaskSteps, key = { it.id }) { step ->
+                                        AgentTaskStepRow(step = step)
+                                    }
+                                }
+                            }
+                        }
+
+                        2 -> {
+                            if (agentTaskLogs.isEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(24.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "No task execution logs yet.\nAutonomous state transitions, plans, tool calls, retries, and outcomes appear here (privacy-scrubbed).",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.testTag("agent_task_logs_empty")
+                                    )
+                                }
+                            } else {
+                                LazyColumn(
+                                    state = logListState,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .testTag("agent_task_logs_list"),
+                                    contentPadding = PaddingValues(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    items(agentTaskLogs) { entry ->
+                                        AgentTaskLogRow(entry = entry)
+                                    }
+                                }
+                            }
+                        }
+
+                        3 -> {
+                            AgentDiagnosticsConsolePanel(
+                                isAccessibilityConnected = isAccessibilityConnected,
+                                activeForegroundPackage = activeForegroundPackage,
+                                latestScreenSnapshot = latestScreenSnapshot,
+                                agentExecutionState = agentExecutionState,
+                                activeAgentPlan = activeAgentPlan,
+                                pendingConfirmation = pendingConfirmation,
+                                lastActionVerification = lastActionVerification,
+                                deviceTestRecords = deviceTestRecords,
+                                activeHarnessScenario = activeHarnessScenario,
+                                onSelectHarnessScenario = onSelectHarnessScenario,
+                                onClearHarnessRecords = onClearHarnessRecords
+                            )
+                        }
+
+                        else -> if (transcript.isEmpty()) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -391,13 +569,17 @@ fun LiveAssistantScreen(
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.SmartToy,
+                                        imageVector = Icons.Default.GraphicEq,
                                         contentDescription = null,
-                                        tint = ElectricCyan.copy(alpha = 0.75f),
+                                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
                                         modifier = Modifier.size(40.dp)
                                     )
                                     Text(
-                                        text = "No Android Agent actions executed yet.\nAsk ScreenSight AI to open apps, search YouTube, read the screen, set an alarm, or call a trusted contact.",
+                                        text = if (sessionState.isActive) {
+                                            "Live audio & screen session is active.\nSpeak naturally in Bangla or English, or tap Share Screen below."
+                                        } else {
+                                            "Start a Live Session to share your screen and talk with ScreenSight AI Agent in real time."
+                                        },
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         textAlign = TextAlign.Center
@@ -406,56 +588,14 @@ fun LiveAssistantScreen(
                             }
                         } else {
                             LazyColumn(
-                                state = agentListState,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .testTag("agent_activity_list"),
-                                contentPadding = PaddingValues(14.dp),
+                                state = listState,
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                items(agentTaskSteps, key = { it.id }) { step ->
-                                    AgentTaskStepRow(step = step)
+                                items(transcript, key = { it.id }) { msg ->
+                                    TranscriptBubble(message = msg)
                                 }
-                            }
-                        }
-                    } else if (transcript.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(24.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.GraphicEq,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                                    modifier = Modifier.size(40.dp)
-                                )
-                                Text(
-                                    text = if (sessionState.isActive) {
-                                        "Live audio & screen session is active.\nSpeak naturally in Bangla or English, or tap Share Screen below."
-                                    } else {
-                                        "Start a Live Session to share your screen and talk with ScreenSight AI Agent in real time."
-                                    },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-                        }
-                    } else {
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            items(transcript, key = { it.id }) { msg ->
-                                TranscriptBubble(message = msg)
                             }
                         }
                     }
@@ -571,17 +711,17 @@ private fun LiveStateVisualizerCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 // Distinct Custom Canvas State Visualizer (not a generic spinner)
                 Box(
-                    modifier = Modifier.size(64.dp),
+                    modifier = Modifier.size(50.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
@@ -1086,10 +1226,138 @@ private fun stateAccentColor(state: LiveSessionState): Color {
 }
 
 @Composable
+private fun AgentPlanStatusCard(
+    executionState: AgentExecutionState,
+    activePlan: AgentTaskPlan?
+) {
+    val badgeColor = when (executionState) {
+        AgentExecutionState.COMPLETED -> EmeraldLive
+        AgentExecutionState.FAILED -> CrimsonAlert
+        AgentExecutionState.RECOVERING,
+        AgentExecutionState.WAITING_FOR_USER -> AmberThinking
+        AgentExecutionState.PLANNING,
+        AgentExecutionState.UNDERSTANDING,
+        AgentExecutionState.EXECUTING,
+        AgentExecutionState.OBSERVING,
+        AgentExecutionState.WAITING_FOR_ACTION -> ElectricCyan
+        AgentExecutionState.CANCELLED,
+        AgentExecutionState.IDLE -> Color(0xFF94A3B8)
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("agent_plan_status_card"),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(badgeColor)
+                    )
+                    Text(
+                        text = "Agent: ${executionState.labelEn}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = badgeColor,
+                        modifier = Modifier.testTag("agent_execution_state_badge")
+                    )
+                }
+                if (activePlan != null && activePlan.steps.isNotEmpty()) {
+                    Text(
+                        text = "Plan ${activePlan.completedStepsCount}/${activePlan.steps.size} • Steps ${activePlan.totalToolStepsExecuted}/${activePlan.maxStepsAllowed}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            if (activePlan != null && activePlan.steps.isNotEmpty()) {
+                Text(
+                    text = activePlan.taskDescription,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1
+                )
+                LinearProgressIndicator(
+                    progress = { activePlan.progressFraction },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp)),
+                    color = badgeColor,
+                    trackColor = MaterialTheme.colorScheme.surface
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentTaskLogRow(entry: AgentTaskLogger.TaskLogEntry) {
+    val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(entry.timestampMillis))
+    val tagColor = when (entry.type) {
+        AgentTaskLogger.LogEventType.ERROR -> CrimsonAlert
+        AgentTaskLogger.LogEventType.RETRY,
+        AgentTaskLogger.LogEventType.CONFIRMATION -> AmberThinking
+        AgentTaskLogger.LogEventType.STATE_TRANSITION,
+        AgentTaskLogger.LogEventType.PLAN_CREATED,
+        AgentTaskLogger.LogEventType.PLAN_UPDATED -> ElectricCyan
+        AgentTaskLogger.LogEventType.TOOL_RESULT,
+        AgentTaskLogger.LogEventType.TASK_FINISHED -> EmeraldLive
+        else -> IndigoGlow
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            text = timeStr,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = entry.type.name,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = tagColor
+        )
+        Text(
+            text = entry.message,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
 private fun AgentTaskStepRow(step: AgentTaskStep) {
     val statusColor = when (step.status) {
         AgentStepStatus.COMPLETED -> EmeraldLive
         AgentStepStatus.RUNNING -> ElectricCyan
+        AgentStepStatus.RECOVERING,
         AgentStepStatus.WAITING_CONFIRMATION -> AmberThinking
         AgentStepStatus.FAILED -> CrimsonAlert
         AgentStepStatus.CANCELLED -> Color(0xFF94A3B8)
@@ -1097,6 +1365,7 @@ private fun AgentTaskStepRow(step: AgentTaskStep) {
     }
     val statusIcon = when (step.status) {
         AgentStepStatus.COMPLETED -> Icons.Default.CheckCircle
+        AgentStepStatus.RECOVERING -> Icons.Default.Refresh
         AgentStepStatus.FAILED,
         AgentStepStatus.CANCELLED -> Icons.Default.Cancel
         else -> Icons.Default.HourglassTop
@@ -1138,8 +1407,9 @@ private fun AgentTaskStepRow(step: AgentTaskStep) {
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
+                    val retrySuffix = if (step.retryCount > 0) " • Retry ${step.retryCount}" else ""
                     Text(
-                        text = "${step.status.labelEn} • $timeStr",
+                        text = "${step.status.labelEn}$retrySuffix • $timeStr",
                         style = MaterialTheme.typography.labelSmall,
                         color = statusColor
                     )
@@ -1158,5 +1428,293 @@ private fun AgentTaskStepRow(step: AgentTaskStep) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun RecoverableCheckpointBanner(
+    checkpoint: RecoverableTaskCheckpoint,
+    onResume: () -> Unit,
+    onCancel: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("recoverable_checkpoint_card"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = IndigoGlow.copy(alpha = 0.16f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = "Incomplete Task Detected • অসমাপ্ত কাজ পাওয়া গেছে",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = ElectricCyan
+            )
+            Text(
+                text = "${checkpoint.sanitizedRequest} (${checkpoint.completedStepsCount}/${checkpoint.totalStepsCount} steps)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            if (checkpoint.containsSensitiveAction) {
+                Text(
+                    text = "Safety: sensitive actions (calls/messages) will NOT be auto-replayed.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AmberThinking
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onResume,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("checkpoint_resume_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(vertical = 6.dp)
+                ) {
+                    Text("Resume Safe Steps", style = MaterialTheme.typography.labelMedium)
+                }
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("checkpoint_cancel_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(vertical = 6.dp)
+                ) {
+                    Text("Discard / বাতিল", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentDiagnosticsConsolePanel(
+    isAccessibilityConnected: Boolean,
+    activeForegroundPackage: String,
+    latestScreenSnapshot: ScreenUiSnapshot?,
+    agentExecutionState: AgentExecutionState,
+    activeAgentPlan: AgentTaskPlan?,
+    pendingConfirmation: PendingConfirmation?,
+    lastActionVerification: LastActionVerification?,
+    deviceTestRecords: List<PhysicalDeviceTestHarness.DeviceTestRunRecord>,
+    activeHarnessScenario: PhysicalDeviceTestHarness.DeviceTestScenario?,
+    onSelectHarnessScenario: (PhysicalDeviceTestHarness.DeviceTestScenario?) -> Unit,
+    onClearHarnessRecords: () -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("agent_diagnostics_panel"),
+        contentPadding = PaddingValues(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        item {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "On-Device Grounding & Runtime Status",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = ElectricCyan
+                    )
+                    DiagnosticLine(
+                        label = "Accessibility Service",
+                        value = if (isAccessibilityConnected) "CONNECTED" else "DISCONNECTED",
+                        valueColor = if (isAccessibilityConnected) EmeraldLive else AmberThinking
+                    )
+                    DiagnosticLine(
+                        label = "Foreground App",
+                        value = activeForegroundPackage.ifBlank { latestScreenSnapshot?.packageName.orEmpty().ifBlank { "None" } }
+                    )
+                    DiagnosticLine(
+                        label = "Grounded UI Elements",
+                        value = if (latestScreenSnapshot != null) {
+                            "${latestScreenSnapshot.elements.size} (${latestScreenSnapshot.observationId}, ${latestScreenSnapshot.screenWidthPx}x${latestScreenSnapshot.screenHeightPx})"
+                        } else {
+                            "0 (no snapshot)"
+                        }
+                    )
+                    DiagnosticLine(
+                        label = "Agent State",
+                        value = "${agentExecutionState.name} (${agentExecutionState.labelBn})"
+                    )
+                    DiagnosticLine(
+                        label = "Task Progress",
+                        value = activeAgentPlan?.let { "${it.completedStepsCount}/${it.steps.size} • ${it.taskDescription.take(36)}" } ?: "No active plan"
+                    )
+                    DiagnosticLine(
+                        label = "Pending Confirmation",
+                        value = pendingConfirmation?.let { "${it.actionRequest.actionType.toolName} (${it.id.take(6)})" } ?: "None",
+                        valueColor = if (pendingConfirmation != null) AmberThinking else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        item {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Last Action Verification",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = ElectricCyan
+                    )
+                    if (lastActionVerification == null) {
+                        Text(
+                            text = "No verified actions recorded in this session yet.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        DiagnosticLine(
+                            label = "Tool / Status",
+                            value = "${lastActionVerification.toolName} • ${lastActionVerification.status}",
+                            valueColor = if (lastActionVerification.verifiedSuccess) EmeraldLive else CrimsonAlert
+                        )
+                        DiagnosticLine(
+                            label = "Verified / Screen Changed",
+                            value = "${lastActionVerification.verifiedSuccess} / ${lastActionVerification.screenChanged} • retries=${lastActionVerification.retryCount} • ${lastActionVerification.durationMs}ms"
+                        )
+                        Text(
+                            text = lastActionVerification.summary,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Physical Device Test Harness (10 Scenarios)",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                if (deviceTestRecords.isNotEmpty()) {
+                    TextButton(onClick = onClearHarnessRecords) {
+                        Text("Reset", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+        }
+
+        items(PhysicalDeviceTestHarness.DeviceTestScenario.entries) { scenario ->
+            val latest = deviceTestRecords.lastOrNull { it.scenario == scenario }
+            val isArmed = activeHarnessScenario == scenario
+            val badgeText = when (latest?.status) {
+                PhysicalDeviceTestHarness.HarnessRunStatus.PASSED ->
+                    if (latest.executedOnPhysicalDevice) "PASS (DEVICE)" else "PASS (SIM)"
+                PhysicalDeviceTestHarness.HarnessRunStatus.FAILED -> "FAILED"
+                else -> if (isArmed) "ARMED" else "NOT_RUN"
+            }
+            val badgeColor = when (latest?.status) {
+                PhysicalDeviceTestHarness.HarnessRunStatus.PASSED -> EmeraldLive
+                PhysicalDeviceTestHarness.HarnessRunStatus.FAILED -> CrimsonAlert
+                else -> if (isArmed) ElectricCyan else MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Surface(
+                onClick = { onSelectHarnessScenario(scenario) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("harness_scenario_${scenario.index}"),
+                shape = RoundedCornerShape(12.dp),
+                color = if (isArmed) {
+                    ElectricCyan.copy(alpha = 0.14f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                }
+            ) {
+                Column(
+                    modifier = Modifier.padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "#${scenario.index} ${scenario.titleEn}",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = badgeText,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = badgeColor
+                        )
+                    }
+                    Text(
+                        text = latest?.let {
+                            "tool=${it.toolName} • ${it.verificationResult} • retries=${it.retryCount} • ${it.executionDurationMs}ms"
+                        } ?: scenario.expectedVerification,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiagnosticLine(
+    label: String,
+    value: String,
+    valueColor: Color = MaterialTheme.colorScheme.onSurface
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = valueColor,
+            maxLines = 1
+        )
     }
 }

@@ -9,6 +9,7 @@ import com.example.agent.AgentCoordinator
 import com.example.agent.AgentMode
 import com.example.agent.AgentToolsSchema
 import com.example.agent.TrustedContactsRepository
+import com.example.agent.VoiceConfirmationParser
 import com.example.data.local.ApiKeyStorage
 import com.example.data.local.SettingsRepository
 import com.example.data.remote.GeminiServerEvent
@@ -95,6 +96,7 @@ class SessionManager(
     private var userRequestedStop = false
     private var sessionJob: Job? = null
     private var reconnectJob: Job? = null
+    private val pendingUserVoiceBuffer = StringBuilder()
 
     init {
         scope.launch {
@@ -203,7 +205,8 @@ class SessionManager(
     }
 
     private suspend fun buildLiveAgentPayload(settings: AppSettings): Pair<String, List<com.example.data.remote.BidiTool>?> {
-        if (!settings.agentToolsEnabled || agentCoordinator == null) {
+        val coordinator = agentCoordinator
+        if (!settings.agentToolsEnabled || coordinator == null) {
             return settings.customSystemInstruction to null
         }
         val trustedNames = runCatching {
@@ -212,13 +215,23 @@ class SessionManager(
             }
         }.getOrDefault(emptyList())
 
+        val memoryContext = if (settings.memoryEnabled) {
+            runCatching { coordinator.retrieveSessionBaselineMemoryContext() }.getOrDefault("")
+        } else {
+            ""
+        }
+        val skillSummaries = runCatching { coordinator.getEnabledSkillSummaries() }
+            .getOrDefault(emptyList())
+
         val instruction = AgentToolsSchema.buildAgentSystemInstruction(
             baseInstruction = settings.customSystemInstruction,
             agentMode = settings.agentMode,
             isAccessibilityConnected = AgentAccessibilityService.isConnected.value,
-            trustedContactNames = trustedNames
+            trustedContactNames = trustedNames,
+            relevantMemoryContext = memoryContext,
+            enabledSkillSummaries = skillSummaries
         )
-        return instruction to AgentToolsSchema.buildAgentTools()
+        return instruction to AgentToolsSchema.buildAgentTools(coordinator.toolRegistry)
     }
 
     private fun handleGeminiEvent(event: GeminiServerEvent) {
@@ -244,6 +257,10 @@ class SessionManager(
             }
 
             is GeminiServerEvent.ToolCall -> {
+                if (pendingUserVoiceBuffer.isNotBlank()) {
+                    agentCoordinator?.onUserRequestReceived(pendingUserVoiceBuffer.toString())
+                    pendingUserVoiceBuffer.clear()
+                }
                 if (_sessionState.value.isActive) {
                     _sessionState.value = LiveSessionState.THINKING
                 }
@@ -258,6 +275,20 @@ class SessionManager(
             }
 
             is GeminiServerEvent.TextDelta -> {
+                if (event.isUserTranscript && event.text.isNotBlank()) {
+                    pendingUserVoiceBuffer.append(event.text)
+                    // Fast-path natural Bangla/English voice confirmation while WAITING_FOR_USER
+                    if (agentCoordinator?.pendingConfirmation?.value != null) {
+                        val candidate = pendingUserVoiceBuffer.toString().trim()
+                        val intent = VoiceConfirmationParser.classify(candidate)
+                        if (intent == VoiceConfirmationParser.ConfirmationIntent.APPROVE ||
+                            intent == VoiceConfirmationParser.ConfirmationIntent.REJECT
+                        ) {
+                            agentCoordinator.onUserRequestReceived(candidate)
+                            pendingUserVoiceBuffer.clear()
+                        }
+                    }
+                }
                 appendOrUpdateStreamingTranscript(
                     sender = if (event.isUserTranscript) MessageSender.USER else MessageSender.GEMINI,
                     deltaText = event.text
@@ -265,6 +296,10 @@ class SessionManager(
             }
 
             is GeminiServerEvent.TurnComplete -> {
+                if (pendingUserVoiceBuffer.isNotBlank()) {
+                    agentCoordinator?.onUserRequestReceived(pendingUserVoiceBuffer.toString())
+                    pendingUserVoiceBuffer.clear()
+                }
                 finalizeStreamingTranscript()
                 audioPlaybackManager.onTurnComplete()
                 if (!audioPlaybackManager.isAiSpeaking.value && _sessionState.value.isActive) {
@@ -278,6 +313,8 @@ class SessionManager(
 
             is GeminiServerEvent.Interrupted -> {
                 audioPlaybackManager.interruptPlayback()
+                agentCoordinator?.onUserInterruption(preservePendingConfirmation = true)
+                pendingUserVoiceBuffer.clear()
                 finalizeStreamingTranscript()
                 if (_sessionState.value.isActive) {
                     _sessionState.value = if (_isSharingScreen.value) {
@@ -360,6 +397,7 @@ class SessionManager(
             onUserVoiceDetected = { wasBargeInWhileAiSpeaking ->
                 if (wasBargeInWhileAiSpeaking && audioPlaybackManager.isAiSpeaking.value) {
                     audioPlaybackManager.interruptPlayback()
+                    agentCoordinator?.onUserInterruption(preservePendingConfirmation = true)
                 }
                 if (_sessionState.value.isActive &&
                     _sessionState.value != LiveSessionState.SHARING_SCREEN &&
@@ -552,7 +590,25 @@ class SessionManager(
         }
 
         _sessionState.value = LiveSessionState.THINKING
-        geminiRepository.sendTextMessage(clean)
+        agentCoordinator?.onUserRequestReceived(clean)
+
+        if (latestSettings.memoryEnabled && agentCoordinator != null) {
+            scope.launch {
+                val retrieval = runCatching {
+                    agentCoordinator.retrieveRelevantMemoriesForRequest(clean)
+                }.getOrNull()
+                val outbound = if (retrieval != null && retrieval.promptContext.isNotBlank()) {
+                    "${retrieval.promptContext}\n\nCurrent user request (takes absolute priority over stored memory): $clean"
+                } else {
+                    clean
+                }
+                if (geminiRepository.isSessionActive()) {
+                    geminiRepository.sendTextMessage(outbound)
+                }
+            }
+        } else {
+            geminiRepository.sendTextMessage(clean)
+        }
     }
 
     fun toggleMicrophoneMute(): Boolean {
