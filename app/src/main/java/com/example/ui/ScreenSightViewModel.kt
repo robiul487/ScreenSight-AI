@@ -5,6 +5,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.AppContainer
+import com.example.agent.AgentActionRequest
+import com.example.agent.AgentActionType
+import com.example.agent.AgentCoordinator
+import com.example.agent.AgentMode
+import com.example.agent.AgentPermissionManager
+import com.example.agent.AgentPermissionsSnapshot
+import com.example.agent.AgentTaskStep
+import com.example.agent.AppLauncher
+import com.example.agent.PendingConfirmation
+import com.example.agent.TrustedContact
+import com.example.agent.TrustedContactsRepository
 import com.example.data.local.ApiKeyRepository
 import com.example.data.local.ApiKeySource
 import com.example.data.local.ApiKeyStorage
@@ -44,7 +55,11 @@ class ScreenSightViewModel(
     private val startSessionUseCase: StartSessionUseCase,
     private val stopSessionUseCase: StopSessionUseCase,
     private val startAudioUseCase: StartAudioUseCase,
-    private val sendTextMessageUseCase: SendTextMessageUseCase
+    private val sendTextMessageUseCase: SendTextMessageUseCase,
+    private val agentCoordinator: AgentCoordinator,
+    private val agentPermissionManager: AgentPermissionManager,
+    private val trustedContactsRepository: TrustedContactsRepository,
+    private val appLauncher: AppLauncher
 ) : ViewModel() {
 
     val settings: StateFlow<AppSettings> = settingsRepository.settingsFlow.stateIn(
@@ -72,11 +87,35 @@ class ScreenSightViewModel(
     val transcript: StateFlow<List<TranscriptMessage>> = sessionManager.transcript
     val activeError: StateFlow<ScreenSightError?> = sessionManager.activeError
 
+    // Android AI Agent State Flows
+    val agentTaskSteps: StateFlow<List<AgentTaskStep>> = agentCoordinator.taskSteps
+    val isAgentTaskRunning: StateFlow<Boolean> = agentCoordinator.isTaskRunning
+    val pendingConfirmation: StateFlow<PendingConfirmation?> = agentCoordinator.pendingConfirmation
+    val agentStatusBannerBn: StateFlow<String> = agentCoordinator.statusBannerBn
+    val permissionsSnapshot: StateFlow<AgentPermissionsSnapshot> = agentPermissionManager.permissions
+    val trustedContacts: StateFlow<List<TrustedContact>> = trustedContactsRepository.trustedContactsFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
     private val _apiValidationState = MutableStateFlow<ApiValidationUiState>(ApiValidationUiState.Idle)
     val apiValidationState: StateFlow<ApiValidationUiState> = _apiValidationState.asStateFlow()
 
     private val _showFirstSessionPrivacyDialog = MutableStateFlow(false)
     val showFirstSessionPrivacyDialog: StateFlow<Boolean> = _showFirstSessionPrivacyDialog.asStateFlow()
+
+    init {
+        refreshPermissions()
+    }
+
+    fun refreshPermissions() {
+        agentPermissionManager.refresh(isScreenSharingActive = sessionManager.isSharingScreen.value)
+    }
+
+    fun createAccessibilitySettingsIntent(): Intent = agentPermissionManager.createAccessibilitySettingsIntent()
+    fun createOverlaySettingsIntent(): Intent = agentPermissionManager.createOverlaySettingsIntent()
+    fun createAppDetailsSettingsIntent(): Intent = agentPermissionManager.createAppDetailsSettingsIntent()
 
     fun saveApiKey(rawKey: String) {
         viewModelScope.launch {
@@ -192,6 +231,110 @@ class ScreenSightViewModel(
         }
     }
 
+    fun updateAgentMode(mode: AgentMode) {
+        viewModelScope.launch {
+            settingsRepository.updateAgentMode(mode)
+        }
+    }
+
+    fun updateAgentToolsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.updateAgentToolsEnabled(enabled)
+        }
+    }
+
+    // Trusted Contacts CRUD
+    fun addTrustedContact(name: String, phone: String, nickname: String, relationship: String) {
+        viewModelScope.launch {
+            trustedContactsRepository.addOrUpdateContact(
+                name = name,
+                phoneNumber = phone,
+                nickname = nickname,
+                relationship = relationship
+            )
+        }
+    }
+
+    fun removeTrustedContact(contactId: String) {
+        viewModelScope.launch {
+            trustedContactsRepository.removeContact(contactId)
+        }
+    }
+
+    fun dialTrustedContact(contact: TrustedContact) {
+        appLauncher.openDialer(contact.phoneNumber, contact.name)
+    }
+
+    // Agent Task Controls & Quick Actions
+    fun approvePendingConfirmation() {
+        agentCoordinator.approvePendingConfirmation()
+    }
+
+    fun rejectPendingConfirmation() {
+        agentCoordinator.rejectPendingConfirmation()
+    }
+
+    fun cancelActiveAgentTask() {
+        agentCoordinator.cancelCurrentTask()
+    }
+
+    fun clearAgentTaskHistory() {
+        agentCoordinator.clearTaskHistory()
+    }
+
+    fun runQuickOpenApp(appName: String) {
+        agentCoordinator.executeDirectQuickAction(
+            request = AgentActionRequest(
+                actionType = AgentActionType.OPEN_APP,
+                parameters = mapOf("app_name" to appName),
+                reason = "User tapped quick shortcut for $appName"
+            ),
+            isGeminiAudioActive = isAiSpeaking.value
+        )
+    }
+
+    fun runQuickDateTime() {
+        agentCoordinator.executeDirectQuickAction(
+            request = AgentActionRequest(
+                actionType = AgentActionType.GET_DATE_TIME,
+                reason = "User asked for current date and time"
+            ),
+            isGeminiAudioActive = isAiSpeaking.value
+        )
+    }
+
+    fun runQuickReadScreen() {
+        if (sessionState.value.isActive) {
+            sendTextMessage("এই স্ক্রিনে কী লেখা আছে সহজ বাংলায় পড়ে শোনাও।")
+        } else {
+            agentCoordinator.executeDirectQuickAction(
+                request = AgentActionRequest(
+                    actionType = AgentActionType.READ_SCREEN,
+                    reason = "User tapped Read Screen shortcut"
+                ),
+                isGeminiAudioActive = false
+            )
+        }
+    }
+
+    fun runQuickSetAlarm(hour24: Int, minute: Int, label: String = "ScreenSight Alarm") {
+        agentCoordinator.executeDirectQuickAction(
+            request = AgentActionRequest(
+                actionType = AgentActionType.SET_ALARM,
+                parameters = mapOf(
+                    "hour_24" to hour24.toString(),
+                    "minute" to minute.toString(),
+                    "label" to label
+                ),
+                reason = "User tapped Set Alarm shortcut"
+            ),
+            isGeminiAudioActive = isAiSpeaking.value
+        )
+    }
+
+    fun getInstalledApps(): List<AppLauncher.InstalledAppInfo> = appLauncher.getInstalledLauncherApps()
+
+    // Existing Live Session Controls (100% preserved)
     fun requestStartLiveSession(onReadyToNavigateToLive: () -> Unit) {
         if (!settings.value.hasAcceptedPrivacyNotice) {
             _showFirstSessionPrivacyDialog.value = true
@@ -223,10 +366,12 @@ class ScreenSightViewModel(
     }
 
     fun onMicrophonePermissionGranted() {
+        refreshPermissions()
         startAudioUseCase()
     }
 
     fun onMicrophonePermissionDenied() {
+        refreshPermissions()
         sessionManager.onScreenCaptureError(ScreenSightError.MicrophonePermissionDenied)
     }
 
@@ -241,6 +386,7 @@ class ScreenSightViewModel(
             data = data,
             autoMinimizeOnStart = true
         )
+        refreshPermissions()
     }
 
     fun togglePauseScreenSharing() {
@@ -249,6 +395,7 @@ class ScreenSightViewModel(
 
     fun stopScreenSharing() {
         sessionManager.stopScreenSharing()
+        refreshPermissions()
     }
 
     fun toggleMicMute() {
@@ -284,7 +431,11 @@ class ScreenSightViewModel(
                         startSessionUseCase = container.startSessionUseCase,
                         stopSessionUseCase = container.stopSessionUseCase,
                         startAudioUseCase = container.startAudioUseCase,
-                        sendTextMessageUseCase = container.sendTextMessageUseCase
+                        sendTextMessageUseCase = container.sendTextMessageUseCase,
+                        agentCoordinator = container.agentCoordinator,
+                        agentPermissionManager = container.agentPermissionManager,
+                        trustedContactsRepository = container.trustedContactsRepository,
+                        appLauncher = container.appLauncher
                     ) as T
                 }
             }

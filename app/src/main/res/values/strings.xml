@@ -17,4 +17,22 @@
     <string name="notification_sharing_text">Screen sharing and live voice session in progress</string>
     <string name="action_stop_sharing">Stop Screen Sharing</string>
     <string name="action_end_conversation">End Conversation</string>
+
+    <!-- Android AI Agent & Accessibility -->
+    <string name="accessibility_service_label">ScreenSight AI Agent Control</string>
+    <string name="accessibility_service_description">Allows ScreenSight AI to read visible non-sensitive text, tap buttons, scroll pages, type search queries, and navigate apps on your behalf when you give voice instructions. ScreenSight AI never reads password fields or performs financial transactions automatically.</string>
+    <string name="agent_permissions_title">Agent Permissions &amp; Setup</string>
+    <string name="trusted_contacts_title">Trusted Family Contacts</string>
+
+    <!-- Family Easy Mode (Bangla-first) -->
+    <string name="family_mode_subtitle">আপনার সহকারী</string>
+    <string name="family_mode_prompt">আমি কী করতে পারি, বলুন?</string>
+    <string name="family_mode_tap_to_talk">কথা বলুন</string>
+    <string name="family_mode_listening">কথা শুনছি...</string>
+    <string name="family_mode_thinking">বুঝছি...</string>
+    <string name="family_mode_working">একটু অপেক্ষা করুন, কাজটি করছি।</string>
+    <string name="family_mode_done">কাজটি সম্পন্ন হয়েছে।</string>
+    <string name="family_mode_retry">আমি বুঝতে পারিনি, আরেকবার বলবেন?</string>
+    <string name="family_mode_confirm_needed">এই কাজটি করার আগে আপনার অনুমতি প্রয়োজন।</string>
+    <string name="family_mode_stop">থামুন / বন্ধ করুন</string>
 </resources>

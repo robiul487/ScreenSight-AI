@@ -4,6 +4,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Official Gemini Live API (BidiGenerateContent) JSON wire schema.
@@ -21,7 +22,8 @@ object GeminiLiveJson {
 data class BidiClientMessage(
     val setup: BidiSetup? = null,
     val realtimeInput: BidiRealtimeInput? = null,
-    val clientContent: BidiClientContent? = null
+    val clientContent: BidiClientContent? = null,
+    val toolResponse: BidiToolResponse? = null
 )
 
 @Serializable
@@ -29,8 +31,42 @@ data class BidiSetup(
     val model: String,
     val generationConfig: BidiGenerationConfig? = null,
     val systemInstruction: BidiContent? = null,
+    val tools: List<BidiTool>? = null,
     val inputAudioTranscription: BidiAudioTranscriptionConfig? = null,
     val outputAudioTranscription: BidiAudioTranscriptionConfig? = null
+)
+
+@Serializable
+data class BidiTool(
+    val functionDeclarations: List<BidiFunctionDeclaration>? = null
+)
+
+@Serializable
+data class BidiFunctionDeclaration(
+    val name: String,
+    val description: String,
+    val parameters: BidiSchema? = null
+)
+
+@Serializable
+data class BidiSchema(
+    val type: String,
+    val description: String? = null,
+    val properties: Map<String, BidiSchema>? = null,
+    val required: List<String>? = null,
+    val enum: List<String>? = null
+)
+
+@Serializable
+data class BidiToolResponse(
+    val functionResponses: List<BidiFunctionResponse>
+)
+
+@Serializable
+data class BidiFunctionResponse(
+    val id: String? = null,
+    val name: String,
+    val response: JsonObject
 )
 
 @Serializable
@@ -106,8 +142,27 @@ data class BidiInlineData(
 data class BidiServerMessage(
     val setupComplete: JsonElement? = null,
     val serverContent: BidiServerContent? = null,
+    val toolCall: BidiToolCall? = null,
+    val toolCallCancellation: BidiToolCallCancellation? = null,
     val goAway: BidiGoAway? = null,
     val error: BidiErrorPayload? = null
+)
+
+@Serializable
+data class BidiToolCall(
+    val functionCalls: List<BidiFunctionCall> = emptyList()
+)
+
+@Serializable
+data class BidiFunctionCall(
+    val id: String? = null,
+    val name: String,
+    val args: JsonObject? = null
+)
+
+@Serializable
+data class BidiToolCallCancellation(
+    val ids: List<String> = emptyList()
 )
 
 @Serializable
@@ -158,7 +213,8 @@ object GeminiLiveConfigBuilder {
         voiceName: String,
         responseModalities: List<String>,
         systemInstructionText: String,
-        preferredLanguage: String
+        preferredLanguage: String,
+        tools: List<BidiTool>? = null
     ): String {
         val normalizedModel = if (modelId.startsWith("models/")) modelId else "models/$modelId"
         val languageAppendix = if (preferredLanguage.isNotBlank() && !preferredLanguage.startsWith("Auto")) {
@@ -193,10 +249,18 @@ object GeminiLiveConfigBuilder {
             systemInstruction = BidiContent(
                 parts = listOf(BidiPart(text = fullInstruction))
             ),
+            tools = tools?.takeIf { it.isNotEmpty() },
             inputAudioTranscription = BidiAudioTranscriptionConfig(),
             outputAudioTranscription = if (wantsAudio) BidiAudioTranscriptionConfig() else null
         )
         return GeminiLiveJson.json.encodeToString(BidiClientMessage(setup = setup))
+    }
+
+    fun buildToolResponseMessageJson(responses: List<BidiFunctionResponse>): String {
+        val msg = BidiClientMessage(
+            toolResponse = BidiToolResponse(functionResponses = responses)
+        )
+        return GeminiLiveJson.json.encodeToString(msg)
     }
 
     fun buildAudioChunkMessageJson(base64Pcm16k: String, sampleRateHz: Int = 16000): String {

@@ -1,5 +1,6 @@
 package com.example.domain.model
 
+import com.example.agent.AgentMode
 import kotlinx.serialization.Serializable
 
 /**
@@ -194,7 +195,10 @@ data class AppSettings(
     val dynamicColorEnabled: Boolean = false,
     val hapticFeedbackEnabled: Boolean = true,
     val hasAcceptedPrivacyNotice: Boolean = false,
-    val lastSessionSummary: String = "No session recorded yet"
+    val lastSessionSummary: String = "No session recorded yet",
+    val agentMode: AgentMode = AgentMode.STANDARD_AGENT,
+    val agentToolsEnabled: Boolean = true,
+    val lastAgentTaskSummary: String = "No agent task recorded yet"
 ) {
     companion object {
         const val DEFAULT_SYSTEM_INSTRUCTION = """You are ScreenSight AI, a real-time visual assistant.

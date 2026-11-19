@@ -24,15 +24,24 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.AccessibilityNew
+import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Elderly
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.PresentToAll
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Lock
@@ -43,6 +52,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -65,20 +75,26 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.agent.AgentMode
+import com.example.agent.AgentPermissionsSnapshot
 import com.example.domain.model.AppSettings
 import com.example.domain.model.GeminiLiveModel
 import com.example.domain.model.LiveSessionState
 import com.example.ui.theme.AmberThinking
+import com.example.ui.theme.CrimsonAlert
 import com.example.ui.theme.ElectricCyan
 import com.example.ui.theme.EmeraldLive
 import com.example.ui.theme.IndigoGlow
 
 /**
- * Main Home Screen (Section 9.1).
- * Includes:
- * - Header: ScreenSight AI logo, App name, Settings icon.
- * - Main section: Welcome message, Gemini connection status, Selected model, API key status, Start Live button.
- * - Secondary information: Last session status, Quick settings access, Privacy information.
+ * Main Dashboard Home Screen (Section 17).
+ * Preserves ScreenSight AI's dark navy/slate/cyan visual identity and all existing BYOK /
+ * Gemini Live capabilities while introducing:
+ * - Android AI Agent control status (clearly distinguished from Gemini Live voice/screen)
+ * - Dual operating modes (Standard Agent & Family Easy Mode)
+ * - Real deterministic Quick Actions
+ * - Agent Permissions & Setup summary card
+ * - Last Session & Recent Agent Task summary
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,11 +104,20 @@ fun HomeScreen(
     maskedApiKey: String,
     sessionState: LiveSessionState,
     isSharingScreen: Boolean,
+    permissions: AgentPermissionsSnapshot,
     showFirstSessionPrivacyDialog: Boolean,
     onStartLiveClicked: () -> Unit,
     onConfirmPrivacyAndStart: () -> Unit,
     onDismissPrivacyDialog: () -> Unit,
+    onSelectAgentMode: (AgentMode) -> Unit,
+    onOpenFamilyEasyMode: () -> Unit,
     onNavigateToLiveScreen: () -> Unit,
+    onNavigateToAgentPermissions: () -> Unit,
+    onNavigateToTrustedContacts: () -> Unit,
+    onQuickOpenYouTube: () -> Unit,
+    onQuickReadScreen: () -> Unit,
+    onQuickSetAlarm: () -> Unit,
+    onQuickTellTime: () -> Unit,
     onNavigateToApiSettings: () -> Unit,
     onNavigateToAppearanceSettings: () -> Unit,
     onNavigateToPrivacy: () -> Unit
@@ -144,7 +169,7 @@ fun HomeScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "BYOK • Apache 2.0 Open Source",
+                                text = "BYOK • Voice Android AI Agent",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -191,7 +216,7 @@ fun HomeScreen(
                     .padding(horizontal = 20.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Hero Welcome & Live Session Launcher Card
+                // Hero Welcome & Live Voice Agent Launcher Card
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -234,8 +259,8 @@ fun HomeScreen(
                             )
                             Text(
                                 text = when {
-                                    sessionState.isActive -> "LIVE SESSION ACTIVE: ${sessionState.displayName.uppercase()}"
-                                    hasApiKey -> "READY FOR GEMINI LIVE"
+                                    sessionState.isActive -> "LIVE AGENT ACTIVE: ${sessionState.displayName.uppercase()}"
+                                    hasApiKey -> "READY FOR GEMINI LIVE AGENT"
                                     else -> "API KEY CONFIGURATION REQUIRED"
                                 },
                                 style = MaterialTheme.typography.labelMedium,
@@ -255,7 +280,7 @@ fun HomeScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
-                        // Connection, Model, and API Key Status Grid
+                        // Connection, Model, API Key, and Agent Control Status Grid
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -288,6 +313,17 @@ fun HomeScreen(
                                 },
                                 statusColor = if (sessionState.isActive) EmeraldLive else MaterialTheme.colorScheme.onSurfaceVariant,
                                 testTag = "status_connection"
+                            )
+                            StatusDetailRow(
+                                icon = Icons.Default.AccessibilityNew,
+                                label = "Agent Device Control",
+                                value = if (permissions.isAgentControlReady) {
+                                    "Accessibility Ready"
+                                } else {
+                                    "Not Enabled (Tap Setup)"
+                                },
+                                statusColor = if (permissions.isAgentControlReady) EmeraldLive else AmberThinking,
+                                testTag = "status_agent_control"
                             )
                         }
 
@@ -379,7 +415,227 @@ fun HomeScreen(
                     }
                 }
 
-                // Last Session Status Card
+                // Dual Operating Mode Card (Standard Agent vs Family Easy Mode)
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("agent_mode_card"),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SmartToy,
+                                contentDescription = null,
+                                tint = ElectricCyan
+                            )
+                            Column {
+                                Text(
+                                    text = "Agent Operating Mode",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Both modes share the same Gemini Live & Accessibility engine",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            FilterChip(
+                                selected = settings.agentMode == AgentMode.STANDARD_AGENT,
+                                onClick = { onSelectAgentMode(AgentMode.STANDARD_AGENT) },
+                                label = { Text("Standard Agent") },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("mode_chip_standard")
+                            )
+                            FilterChip(
+                                selected = settings.agentMode == AgentMode.FAMILY_EASY_MODE,
+                                onClick = { onSelectAgentMode(AgentMode.FAMILY_EASY_MODE) },
+                                label = { Text("Family Easy Mode") },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("mode_chip_family")
+                            )
+                        }
+
+                        FilledTonalButton(
+                            onClick = onOpenFamilyEasyMode,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .testTag("open_family_mode_button"),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.Default.Elderly, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Open Family Easy Mode (সহজ বাংলা মোড)",
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                // Quick Agent Actions Grid (Real deterministic shortcuts)
+                Text(
+                    text = "Quick Agent Actions",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        QuickAccessTile(
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("quick_action_youtube"),
+                            icon = Icons.Default.PlayCircle,
+                            title = "Open YouTube",
+                            subtitle = "Launch via Intent",
+                            onClick = onQuickOpenYouTube
+                        )
+                        QuickAccessTile(
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("quick_action_contacts"),
+                            icon = Icons.Default.Call,
+                            title = "Trusted Calls",
+                            subtitle = "Family nicknames",
+                            onClick = onNavigateToTrustedContacts
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        QuickAccessTile(
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("quick_action_read_screen"),
+                            icon = Icons.Default.RecordVoiceOver,
+                            title = "Read Screen",
+                            subtitle = "Accessible UI text",
+                            onClick = onQuickReadScreen
+                        )
+                        QuickAccessTile(
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("quick_action_alarm"),
+                            icon = Icons.Default.Alarm,
+                            title = "Set 6:00 AM Alarm",
+                            subtitle = "Clock Intent",
+                            onClick = onQuickSetAlarm
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        QuickAccessTile(
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("quick_action_time"),
+                            icon = Icons.Default.AccessTime,
+                            title = "Date & Time",
+                            subtitle = "Speak in Bangla",
+                            onClick = onQuickTellTime
+                        )
+                        QuickAccessTile(
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("quick_action_permissions"),
+                            icon = Icons.Default.Shield,
+                            title = "Permissions",
+                            subtitle = if (permissions.isAgentControlReady) "Agent Ready" else "Setup Needed",
+                            onClick = onNavigateToAgentPermissions
+                        )
+                    }
+                }
+
+                // Agent Permissions Summary Card
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onNavigateToAgentPermissions)
+                        .testTag("agent_permissions_summary_card"),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AccessibilityNew,
+                                    contentDescription = null,
+                                    tint = if (permissions.isAgentControlReady) EmeraldLive else AmberThinking
+                                )
+                                Text(
+                                    text = "Agent Permissions Status",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = "Open Agent Permissions",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            PermissionBadgeChip(
+                                modifier = Modifier.weight(1f),
+                                label = "Accessibility",
+                                granted = permissions.isAgentControlReady
+                            )
+                            PermissionBadgeChip(
+                                modifier = Modifier.weight(1f),
+                                label = "Microphone",
+                                granted = permissions.hasMicrophone
+                            )
+                            PermissionBadgeChip(
+                                modifier = Modifier.weight(1f),
+                                label = "Overlay",
+                                granted = permissions.canDrawOverlays
+                            )
+                        }
+                    }
+                }
+
+                // Last Session & Recent Agent Task Status Card
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -409,9 +665,12 @@ fun HomeScreen(
                                 tint = MaterialTheme.colorScheme.onSecondaryContainer
                             )
                         }
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
                             Text(
-                                text = "Last Session Status",
+                                text = "Last Session & Agent Activity",
                                 style = MaterialTheme.typography.titleMedium
                             )
                             Text(
@@ -419,11 +678,16 @@ fun HomeScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            Text(
+                                text = "Last Agent Action: ${settings.lastAgentTaskSummary}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = ElectricCyan
+                            )
                         }
                     }
                 }
 
-                // Quick Settings Access Row
+                // Quick Settings Access Row (Preserved)
                 Text(
                     text = "Quick Configuration",
                     style = MaterialTheme.typography.titleMedium,
@@ -454,7 +718,7 @@ fun HomeScreen(
                     )
                 }
 
-                // Privacy & Direct Connection Card
+                // Privacy & Direct Connection Card (Preserved)
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -500,6 +764,36 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(16.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun PermissionBadgeChip(
+    modifier: Modifier = Modifier,
+    label: String,
+    granted: Boolean
+) {
+    val color = if (granted) EmeraldLive else AmberThinking
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(color.copy(alpha = 0.14f))
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Icon(
+            imageVector = if (granted) Icons.Default.CheckCircle else Icons.Default.WarningAmber,
+            contentDescription = null,
+            tint = color,
+            modifier = Modifier.size(14.dp)
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            maxLines = 1
+        )
     }
 }
 

@@ -4,6 +4,11 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.media.Image
+import com.example.agent.AgentAccessibilityService
+import com.example.agent.AgentCoordinator
+import com.example.agent.AgentMode
+import com.example.agent.AgentToolsSchema
+import com.example.agent.TrustedContactsRepository
 import com.example.data.local.ApiKeyStorage
 import com.example.data.local.SettingsRepository
 import com.example.data.remote.GeminiServerEvent
@@ -48,7 +53,9 @@ class SessionManager(
     private val settingsRepository: SettingsRepository,
     val audioCaptureManager: AudioCaptureManager,
     val audioPlaybackManager: AudioPlaybackManager,
-    val frameProcessor: FrameProcessor
+    val frameProcessor: FrameProcessor,
+    val agentCoordinator: AgentCoordinator? = null,
+    private val trustedContactsRepository: TrustedContactsRepository? = null
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -174,15 +181,44 @@ class SessionManager(
                 }
             )
 
+            val (agentInstruction, agentTools) = buildLiveAgentPayload(settings)
+            val effectiveLanguage = if (settings.agentMode == AgentMode.FAMILY_EASY_MODE &&
+                settings.preferredLanguage.startsWith("Auto")
+            ) {
+                "Bengali (বাংলা) — also understand English & regional Bangla naturally"
+            } else {
+                settings.preferredLanguage
+            }
+
             geminiRepository.startLiveConnection(
                 apiKey = apiKey,
                 modelId = model.fullResourceName,
                 voiceName = settings.selectedVoiceName,
                 responseModalities = settings.responseModalities,
-                systemInstruction = settings.customSystemInstruction,
-                preferredLanguage = settings.preferredLanguage
+                systemInstruction = agentInstruction,
+                preferredLanguage = effectiveLanguage,
+                tools = agentTools
             )
         }
+    }
+
+    private suspend fun buildLiveAgentPayload(settings: AppSettings): Pair<String, List<com.example.data.remote.BidiTool>?> {
+        if (!settings.agentToolsEnabled || agentCoordinator == null) {
+            return settings.customSystemInstruction to null
+        }
+        val trustedNames = runCatching {
+            trustedContactsRepository?.trustedContactsFlow?.first().orEmpty().map {
+                if (it.nickname.isNotBlank()) "${it.name} (${it.nickname})" else it.name
+            }
+        }.getOrDefault(emptyList())
+
+        val instruction = AgentToolsSchema.buildAgentSystemInstruction(
+            baseInstruction = settings.customSystemInstruction,
+            agentMode = settings.agentMode,
+            isAccessibilityConnected = AgentAccessibilityService.isConnected.value,
+            trustedContactNames = trustedNames
+        )
+        return instruction to AgentToolsSchema.buildAgentTools()
     }
 
     private fun handleGeminiEvent(event: GeminiServerEvent) {
@@ -203,7 +239,22 @@ class SessionManager(
             }
 
             is GeminiServerEvent.AudioChunk -> {
+                agentCoordinator?.stopLocalVoiceFeedback()
                 audioPlaybackManager.enqueueAudioChunk(event.pcm24kBytes)
+            }
+
+            is GeminiServerEvent.ToolCall -> {
+                if (_sessionState.value.isActive) {
+                    _sessionState.value = LiveSessionState.THINKING
+                }
+                agentCoordinator?.onGeminiToolCalls(
+                    functionCalls = event.functionCalls,
+                    onSystemNote = { note -> appendSystemMessage(note) }
+                )
+            }
+
+            is GeminiServerEvent.ToolCallCancelled -> {
+                agentCoordinator?.onGeminiToolCallsCancelled(event.ids)
             }
 
             is GeminiServerEvent.TextDelta -> {
@@ -275,13 +326,15 @@ class SessionManager(
                 return@launch
             }
             val model = GeminiLiveModel.findByIdOrCustom(latestSettings.selectedModelId)
+            val (agentInstruction, agentTools) = buildLiveAgentPayload(latestSettings)
             geminiRepository.startLiveConnection(
                 apiKey = apiKey,
                 modelId = model.fullResourceName,
                 voiceName = latestSettings.selectedVoiceName,
                 responseModalities = latestSettings.responseModalities,
-                systemInstruction = latestSettings.customSystemInstruction,
-                preferredLanguage = latestSettings.preferredLanguage
+                systemInstruction = agentInstruction,
+                preferredLanguage = latestSettings.preferredLanguage,
+                tools = agentTools
             )
         }
     }
@@ -549,6 +602,7 @@ class SessionManager(
         val startedAt = _sessionStartTimeMillis.value
         val framesSent = _framesSentCount.value
 
+        agentCoordinator?.cancelCurrentTask()
         cleanupActiveStreams(stopService = !fromService)
         geminiRepository.stopLiveConnection()
 

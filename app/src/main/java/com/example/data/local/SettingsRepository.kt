@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.agent.AgentMode
 import com.example.domain.model.AppSettings
 import com.example.domain.model.GeminiLiveModel
 import com.example.domain.model.GeminiVoice
@@ -38,6 +39,9 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             listOf("AUDIO")
         }
 
+        val modeStr = prefs[KEY_AGENT_MODE] ?: AgentMode.STANDARD_AGENT.name
+        val agentMode = runCatching { AgentMode.valueOf(modeStr) }.getOrDefault(AgentMode.STANDARD_AGENT)
+
         AppSettings(
             selectedModelId = activeModelId,
             selectedVoiceName = prefs[KEY_SELECTED_VOICE] ?: GeminiVoice.AOEDE.voiceName,
@@ -51,7 +55,10 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             dynamicColorEnabled = prefs[KEY_DYNAMIC_COLOR] ?: false,
             hapticFeedbackEnabled = prefs[KEY_HAPTIC_FEEDBACK] ?: true,
             hasAcceptedPrivacyNotice = prefs[KEY_PRIVACY_ACCEPTED] ?: false,
-            lastSessionSummary = prefs[KEY_LAST_SESSION_SUMMARY] ?: "No session recorded yet"
+            lastSessionSummary = prefs[KEY_LAST_SESSION_SUMMARY] ?: "No session recorded yet",
+            agentMode = agentMode,
+            agentToolsEnabled = prefs[KEY_AGENT_TOOLS_ENABLED] ?: true,
+            lastAgentTaskSummary = prefs[KEY_LAST_AGENT_TASK_SUMMARY] ?: "No agent task recorded yet"
         )
     }
 
@@ -105,6 +112,18 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         dataStore.edit { it[KEY_LAST_SESSION_SUMMARY] = summary }
     }
 
+    suspend fun updateAgentMode(mode: AgentMode) {
+        dataStore.edit { it[KEY_AGENT_MODE] = mode.name }
+    }
+
+    suspend fun updateAgentToolsEnabled(enabled: Boolean) {
+        dataStore.edit { it[KEY_AGENT_TOOLS_ENABLED] = enabled }
+    }
+
+    suspend fun updateLastAgentTaskSummary(summary: String) {
+        dataStore.edit { it[KEY_LAST_AGENT_TASK_SUMMARY] = summary }
+    }
+
     companion object {
         private val KEY_SELECTED_MODEL = stringPreferencesKey("selected_model_id")
         private val KEY_SELECTED_VOICE = stringPreferencesKey("selected_voice_name")
@@ -118,5 +137,8 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         private val KEY_HAPTIC_FEEDBACK = booleanPreferencesKey("haptic_feedback_enabled")
         private val KEY_PRIVACY_ACCEPTED = booleanPreferencesKey("privacy_notice_accepted")
         private val KEY_LAST_SESSION_SUMMARY = stringPreferencesKey("last_session_summary")
+        private val KEY_AGENT_MODE = stringPreferencesKey("agent_mode")
+        private val KEY_AGENT_TOOLS_ENABLED = booleanPreferencesKey("agent_tools_enabled")
+        private val KEY_LAST_AGENT_TASK_SUMMARY = stringPreferencesKey("last_agent_task_summary")
     }
 }

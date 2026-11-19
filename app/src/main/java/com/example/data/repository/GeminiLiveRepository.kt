@@ -1,6 +1,8 @@
 package com.example.data.repository
 
 import com.example.data.remote.ApiValidationResult
+import com.example.data.remote.BidiFunctionResponse
+import com.example.data.remote.BidiTool
 import com.example.data.remote.GeminiServerEvent
 import com.example.data.remote.GeminiWebSocketClient
 import kotlinx.coroutines.flow.SharedFlow
@@ -25,7 +27,8 @@ class GeminiLiveRepository(
         voiceName: String,
         responseModalities: List<String>,
         systemInstruction: String,
-        preferredLanguage: String
+        preferredLanguage: String,
+        tools: List<BidiTool>? = null
     ) {
         webSocketClient.connect(
             apiKey = apiKey,
@@ -33,8 +36,13 @@ class GeminiLiveRepository(
             voiceName = voiceName,
             responseModalities = responseModalities,
             systemInstruction = systemInstruction,
-            preferredLanguage = preferredLanguage
+            preferredLanguage = preferredLanguage,
+            tools = tools
         )
+    }
+
+    fun sendToolResponses(responses: List<BidiFunctionResponse>): Boolean {
+        return webSocketClient.sendToolResponses(responses)
     }
 
     fun sendAudioChunk(pcmBytes: ByteArray, sampleRateHz: Int = 16000): Boolean {

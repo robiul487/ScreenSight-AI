@@ -35,6 +35,8 @@ sealed class GeminiServerEvent {
     object SetupComplete : GeminiServerEvent()
     data class TextDelta(val text: String, val isUserTranscript: Boolean = false) : GeminiServerEvent()
     data class AudioChunk(val pcm24kBytes: ByteArray) : GeminiServerEvent()
+    data class ToolCall(val functionCalls: List<BidiFunctionCall>) : GeminiServerEvent()
+    data class ToolCallCancelled(val ids: List<String>) : GeminiServerEvent()
     object TurnComplete : GeminiServerEvent()
     object Interrupted : GeminiServerEvent()
     data class SessionGoAway(val timeLeft: String) : GeminiServerEvent()
@@ -143,7 +145,8 @@ class GeminiWebSocketClient(
         voiceName: String,
         responseModalities: List<String>,
         systemInstruction: String,
-        preferredLanguage: String
+        preferredLanguage: String,
+        tools: List<BidiTool>? = null
     ) {
         val trimmedKey = apiKey.trim()
         if (trimmedKey.isEmpty()) {
@@ -173,7 +176,8 @@ class GeminiWebSocketClient(
                     voiceName = voiceName,
                     responseModalities = responseModalities,
                     systemInstruction = systemInstruction,
-                    preferredLanguage = preferredLanguage
+                    preferredLanguage = preferredLanguage,
+                    tools = tools
                 )
             }
 
@@ -277,7 +281,8 @@ class GeminiWebSocketClient(
         voiceName: String,
         responseModalities: List<String>,
         systemInstruction: String,
-        preferredLanguage: String
+        preferredLanguage: String,
+        tools: List<BidiTool>? = null
     ): Boolean {
         val ws = webSocket ?: return false
         val payload = GeminiLiveConfigBuilder.buildSetupMessageJson(
@@ -285,8 +290,19 @@ class GeminiWebSocketClient(
             voiceName = voiceName,
             responseModalities = responseModalities,
             systemInstructionText = systemInstruction,
-            preferredLanguage = preferredLanguage
+            preferredLanguage = preferredLanguage,
+            tools = tools
         )
+        return ws.send(payload)
+    }
+
+    /**
+     * Sends structured client-side tool execution responses back to Gemini Live.
+     */
+    fun sendToolResponses(responses: List<BidiFunctionResponse>): Boolean {
+        val ws = activeWebSocket ?: return false
+        if (!isConnected.get() || !isSetupCompleted.get() || responses.isEmpty()) return false
+        val payload = GeminiLiveConfigBuilder.buildToolResponseMessageJson(responses)
         return ws.send(payload)
     }
 
@@ -379,6 +395,14 @@ class GeminiWebSocketClient(
                 _events.tryEmit(
                     GeminiServerEvent.SessionGoAway(serverMessage.goAway.timeLeft ?: "60s")
                 )
+            }
+
+            serverMessage.toolCallCancellation?.ids?.takeIf { it.isNotEmpty() }?.let { cancelledIds ->
+                _events.tryEmit(GeminiServerEvent.ToolCallCancelled(cancelledIds))
+            }
+
+            serverMessage.toolCall?.functionCalls?.takeIf { it.isNotEmpty() }?.let { calls ->
+                _events.tryEmit(GeminiServerEvent.ToolCall(calls))
             }
 
             serverMessage.serverContent?.let { content ->

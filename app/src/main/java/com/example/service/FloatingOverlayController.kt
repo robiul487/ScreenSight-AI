@@ -62,6 +62,8 @@ class FloatingOverlayController(
     private var isSharingScreenState = false
     private var isCapturePausedState = false
     private var isMicMutedState = false
+    private var isAgentWorkingState = false
+    private var hasPendingConfirmationState = false
     private var latestSessionState = LiveSessionState.IDLE
     private var stateJob: Job? = null
 
@@ -325,12 +327,28 @@ class FloatingOverlayController(
                     )
                 }
             }
+            sessionManager.agentCoordinator?.let { coordinator ->
+                launch {
+                    coordinator.isTaskRunning.collectLatest { running ->
+                        isAgentWorkingState = running
+                        refreshStatusUi()
+                    }
+                }
+                launch {
+                    coordinator.pendingConfirmation.collectLatest { pending ->
+                        hasPendingConfirmationState = pending != null
+                        refreshStatusUi()
+                    }
+                }
+            }
         }
     }
 
     private fun refreshStatusUi() {
         val arrow = if (isExpanded) "▴" else "▾"
         val label = when {
+            hasPendingConfirmationState -> "Confirm Action $arrow"
+            isAgentWorkingState -> "Agent Working... $arrow"
             isSharingScreenState && isCapturePausedState -> "Screen Paused $arrow"
             latestSessionState == LiveSessionState.SPEAKING -> "Gemini Speaking $arrow"
             latestSessionState == LiveSessionState.THINKING -> "Thinking... $arrow"
@@ -342,6 +360,8 @@ class FloatingOverlayController(
 
         val dotColor = when {
             latestSessionState == LiveSessionState.ERROR -> "#EF4444"
+            hasPendingConfirmationState -> "#F59E0B"
+            isAgentWorkingState -> "#38BDF8"
             latestSessionState == LiveSessionState.SPEAKING -> "#818CF8"
             latestSessionState == LiveSessionState.RECONNECTING ||
                 latestSessionState == LiveSessionState.THINKING -> "#F59E0B"
