@@ -146,6 +146,8 @@ class AppContainer(context: Context) {
         toolExecutor = { req, confirmed -> agentActionExecutor.execute(req, confirmed) }
     )
 
+    val appContext: Context = context.applicationContext
+
     val safeWebAutomationManager = SafeWebAutomationManager()
 
     init {
@@ -153,6 +155,16 @@ class AppContainer(context: Context) {
             settingsRepository.settingsFlow.collectLatest { settings ->
                 memoryEnabledState.set(settings.memoryEnabled)
                 proactiveEnabledState.set(settings.proactiveSuggestionsEnabled)
+                banglaVoiceFeedbackManager.setSpeechRate(settings.ttsSpeechRate)
+                banglaVoiceFeedbackManager.setVoiceOutputEnabled(settings.voiceOutputEnabled)
+                audioPlaybackManager.setOutputVolume(settings.voiceOutputVolume)
+                agentCoordinator.updateExecutionConfig(
+                    com.example.agent.AgentExecutionConfig(
+                        maxStepsPerTask = settings.maxTaskSteps,
+                        maxRetriesPerAction = settings.maxActionRetries,
+                        defaultToolTimeoutMs = settings.agentToolTimeoutSec * 1_000L
+                    )
+                )
             }
         }
         appScope.launch {

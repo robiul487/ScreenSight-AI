@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -43,6 +44,7 @@ import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Cancel
@@ -173,7 +175,9 @@ fun LiveAssistantScreen(
     onSendTextMessage: (String) -> Unit,
     onClearTranscript: () -> Unit,
     onDismissError: () -> Unit,
-    onNavigateToApiSettings: () -> Unit
+    onNavigateToApiSettings: () -> Unit,
+    isTopLevelTab: Boolean = false,
+    onOpenDrawer: (() -> Unit)? = null
 ) {
     BackHandler(onBack = onBack)
 
@@ -203,18 +207,30 @@ fun LiveAssistantScreen(
     }
 
     Scaffold(
-        contentWindowInsets = WindowInsets.safeDrawing,
+        contentWindowInsets = if (isTopLevelTab) WindowInsets.statusBars else WindowInsets.safeDrawing,
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    IconButton(
-                        onClick = onBack,
-                        modifier = Modifier.testTag("live_back_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back to Home"
-                        )
+                    if (isTopLevelTab && onOpenDrawer != null) {
+                        IconButton(
+                            onClick = onOpenDrawer,
+                            modifier = Modifier.testTag("live_drawer_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Menu,
+                                contentDescription = "Open navigation menu"
+                            )
+                        }
+                    } else {
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier.testTag("live_back_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back to Home"
+                            )
+                        }
                     }
                 },
                 title = {
@@ -308,6 +324,11 @@ fun LiveAssistantScreen(
                     lastFrameDimensions = lastFrameDimensions,
                     connectionQuality = connectionQuality
                 )
+
+                // Phase 6: Clear Visual Agent Stage Indicator when agent is active
+                AnimatedVisibility(visible = agentExecutionState != AgentExecutionState.IDLE) {
+                    AgentExecutionStageStrip(state = agentExecutionState)
+                }
 
                 // Group B Sensitive Action Confirmation Card (Section 15 & 19)
                 AnimatedVisibility(visible = pendingConfirmation != null) {
@@ -660,12 +681,52 @@ fun LiveAssistantScreen(
                     isSharingScreen = isSharingScreen,
                     isMicMuted = isMicMuted,
                     isAiMuted = isAiMuted,
+                    applyNavigationBarsPadding = !isTopLevelTab,
                     onStartSession = onStartSession,
                     onRequestShareScreen = onRequestShareScreen,
                     onStopShareScreen = onStopShareScreen,
                     onToggleMicMute = onToggleMicMute,
                     onToggleAiAudioMute = onToggleAiAudioMute,
                     onEndConversation = onEndConversation
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentExecutionStageStrip(state: AgentExecutionState) {
+    val stages = listOf(
+        "Understand" to (state == AgentExecutionState.UNDERSTANDING),
+        "Plan" to (state == AgentExecutionState.PLANNING),
+        "Execute" to (state == AgentExecutionState.EXECUTING_ACTION || state == AgentExecutionState.WAITING_CONFIRMATION),
+        "Verify" to (state == AgentExecutionState.VERIFYING || state == AgentExecutionState.OBSERVING_SCREEN),
+        "Done" to (state == AgentExecutionState.COMPLETED)
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .testTag("agent_stage_strip"),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        stages.forEach { (label, active) ->
+            val accent = when {
+                state == AgentExecutionState.FAILED && label == "Execute" -> CrimsonAlert
+                active -> MaterialTheme.colorScheme.primary
+                else -> MaterialTheme.colorScheme.surfaceVariant
+            }
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = if (active) accent.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                    color = if (active) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                 )
             }
         }
@@ -882,6 +943,7 @@ private fun LiveControlDock(
     isSharingScreen: Boolean,
     isMicMuted: Boolean,
     isAiMuted: Boolean,
+    applyNavigationBarsPadding: Boolean = true,
     onStartSession: () -> Unit,
     onRequestShareScreen: () -> Unit,
     onStopShareScreen: () -> Unit,
@@ -892,7 +954,7 @@ private fun LiveControlDock(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .navigationBarsPadding()
+            .then(if (applyNavigationBarsPadding) Modifier.navigationBarsPadding() else Modifier)
             .padding(bottom = 8.dp),
         shape = RoundedCornerShape(22.dp),
         color = MaterialTheme.colorScheme.surface,

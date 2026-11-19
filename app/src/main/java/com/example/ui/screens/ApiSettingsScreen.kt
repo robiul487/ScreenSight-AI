@@ -100,6 +100,7 @@ fun ApiSettingsScreen(
     onValidateApiKey: (String) -> Unit,
     onRemoveApiKey: () -> Unit,
     onSelectModel: (String) -> Unit,
+    onSelectFallbackModel: (String) -> Unit = {},
     onBack: () -> Unit
 ) {
     BackHandler(onBack = onBack)
@@ -604,6 +605,68 @@ fun ApiSettingsScreen(
                                 }
                             }
                         }
+                    }
+                }
+
+                // 3b. Fallback Model & Connection Timeout Summary
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("fallback_model_card"),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "Fallback Model & Session Timeout",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            text = "Used if your primary Live model is unavailable or quota-limited. Active fallback: ${settings.fallbackModelId}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        GeminiLiveModel.VERIFIED_LIVE_MODELS.forEach { fallbackModel ->
+                            val isFallback = settings.fallbackModelId.equals(fallbackModel.id, ignoreCase = true)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(
+                                        if (isFallback) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
+                                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                    )
+                                    .clickable { onSelectFallbackModel(fallbackModel.id) }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                                    .testTag("fallback_model_option_${fallbackModel.id}"),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = fallbackModel.displayName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (isFallback) FontWeight.SemiBold else FontWeight.Normal,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = if (isFallback) "FALLBACK" else "Select",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isFallback) EmeraldLive else MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                        Text(
+                            text = "Tool execution timeout: ${settings.agentToolTimeoutSec}s (adjust in Settings → Agent Behavior).",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
 

@@ -28,8 +28,13 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PresentToAll
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.compose.material.icons.filled.BatteryStd
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -86,6 +91,7 @@ fun AgentPermissionsScreen(
     onBack: () -> Unit
 ) {
     BackHandler(onBack = onBack)
+    val context = LocalContext.current
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -203,6 +209,7 @@ fun AgentPermissionsScreen(
                     },
                     isGranted = permissions.isAgentControlReady,
                     whyRequired = "Required to read non-sensitive screen text, tap buttons, scroll lists, type search queries, and navigate Back/Home inside other apps.",
+                    dependentFeatures = "Autonomous Tap/Scroll/Type, Read Screen, Multi-Step Skills, Verification",
                     howToEnable = "Tap Open Settings → Installed Apps / Downloaded Apps → ScreenSight AI Agent Control → Turn ON.\n(সেটিংস → Installed Apps → ScreenSight AI Agent Control চালু করুন।)",
                     actionLabel = if (permissions.isAgentControlReady) "Open Accessibility Settings" else "Enable Accessibility Service",
                     onAction = onOpenAccessibilitySettings
@@ -216,6 +223,7 @@ fun AgentPermissionsScreen(
                     statusLabel = if (permissions.hasMicrophone) "Granted" else "Not Granted",
                     isGranted = permissions.hasMicrophone,
                     whyRequired = "Required for natural Bangla and English voice instructions with Gemini Live.",
+                    dependentFeatures = "Gemini Live Voice Session, Family Easy Mode Voice Control",
                     howToEnable = "Tap Grant Microphone and choose \"While using the app\".",
                     actionLabel = if (permissions.hasMicrophone) "Granted" else "Grant Microphone",
                     onAction = onRequestMicPermission,
@@ -230,6 +238,7 @@ fun AgentPermissionsScreen(
                     statusLabel = if (permissions.canDrawOverlays) "Enabled" else "Optional • Disabled",
                     isGranted = permissions.canDrawOverlays,
                     whyRequired = "Shows a movable floating pill over other apps so you can mute mic, pause screen sharing, open the app, or stop a task from anywhere.",
+                    dependentFeatures = "Cross-App Floating Control Pill, Instant Stop Button",
                     howToEnable = "Tap Open Overlay Settings and allow \"Display over other apps\" for ScreenSight AI.",
                     actionLabel = "Open Overlay Settings",
                     onAction = onOpenOverlaySettings
@@ -243,6 +252,7 @@ fun AgentPermissionsScreen(
                     statusLabel = if (permissions.isScreenSharingActive) "Active Now" else "Requested Per Session",
                     isGranted = permissions.isScreenSharingActive,
                     whyRequired = "Provides real-time visual screen context (1 FPS) when Accessibility text is unavailable or for visual guidance.",
+                    dependentFeatures = "Visual Screen Q&A, Hybrid Visual+Accessibility Grounding",
                     howToEnable = "Android always asks for explicit consent each time you tap Start Live Session or Share Screen.",
                     actionLabel = "Managed Automatically Per Session",
                     onAction = {},
@@ -257,6 +267,7 @@ fun AgentPermissionsScreen(
                     statusLabel = if (permissions.hasNotifications) "Granted" else "Not Granted",
                     isGranted = permissions.hasNotifications,
                     whyRequired = "Keeps the foreground voice and screen-sharing status visible with a quick Stop button.",
+                    dependentFeatures = "Foreground Live Session Indicator, Scheduled Task Alerts",
                     howToEnable = "Tap Grant Notifications when prompted on Android 13+.",
                     actionLabel = if (permissions.hasNotifications) "Granted" else "Grant Notifications",
                     onAction = onRequestNotificationPermission,
@@ -271,10 +282,34 @@ fun AgentPermissionsScreen(
                     statusLabel = if (permissions.hasContacts) "Granted" else "Optional • Not Granted",
                     isGranted = permissions.hasContacts,
                     whyRequired = "Optional fallback to look up contacts beyond your saved Trusted Family Contacts list. Calling always confirms and opens the Dialer safely.",
+                    dependentFeatures = "Voice Contact Lookup (optional; Trusted Contacts work without this)",
                     howToEnable = "You can also add Trusted Contacts manually without granting full Contacts access.",
                     actionLabel = if (permissions.hasContacts) "Granted" else "Grant Contacts (Optional)",
                     onAction = onRequestContactsPermission,
                     actionEnabled = !permissions.hasContacts
+                )
+
+                // 7. Background Execution & Battery Optimization Guidance (Play-Compliant)
+                PermissionStatusCard(
+                    testTag = "perm_battery_card",
+                    icon = Icons.Default.BatteryStd,
+                    title = "Background Execution & Battery",
+                    statusLabel = "Managed via Android WorkManager",
+                    isGranted = true,
+                    whyRequired = "Scheduled reminders and routines run via battery-friendly Android WorkManager without requesting restricted exact-alarm or battery-exemption permissions.",
+                    dependentFeatures = "Scheduled Tasks, Routine Reminders, Foreground Session Stability",
+                    howToEnable = "If your phone aggressively stops background apps, open Android App Info → Battery and choose Unrestricted.",
+                    actionLabel = "Open Android App Info",
+                    onAction = {
+                        runCatching {
+                            context.startActivity(
+                                Intent(
+                                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    Uri.parse("package:${context.packageName}")
+                                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        }
+                    }
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -291,6 +326,7 @@ private fun PermissionStatusCard(
     statusLabel: String,
     isGranted: Boolean,
     whyRequired: String,
+    dependentFeatures: String = "",
     howToEnable: String,
     actionLabel: String,
     onAction: () -> Unit,
@@ -359,6 +395,14 @@ private fun PermissionStatusCard(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            if (dependentFeatures.isNotBlank()) {
+                Text(
+                    text = "Used by: $dependentFeatures",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
 
             Text(
                 text = howToEnable,

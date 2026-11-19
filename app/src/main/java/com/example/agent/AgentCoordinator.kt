@@ -61,7 +61,8 @@ class AgentCoordinator(
         }
     ),
     val taskLogger: AgentTaskLogger = AgentTaskLogger(),
-    val config: AgentExecutionConfig = AgentExecutionConfig(),
+    @Volatile
+    var config: AgentExecutionConfig = AgentExecutionConfig(),
     private val screenSnapshotProvider: () -> ScreenUiSnapshot? = {
         AgentAccessibilityService.activeInstance?.captureScreenSnapshot()
             ?: AgentAccessibilityService.latestSnapshot.value
@@ -85,6 +86,9 @@ class AgentCoordinator(
     private val dynamicToolManager: DynamicToolManager? = null,
     private val selfReflectionEngine: SelfReflectionEngine? = null
 ) {
+    fun updateExecutionConfig(newConfig: AgentExecutionConfig) {
+        config = newConfig
+    }
     enum class VoiceConfirmationOutcome {
         NO_PENDING_CONFIRMATION,
         APPROVED,

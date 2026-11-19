@@ -55,6 +55,14 @@ class AudioPlaybackManager(
     private val _isAiMuted = MutableStateFlow(false)
     val isAiMuted: StateFlow<Boolean> = _isAiMuted.asStateFlow()
 
+    @Volatile
+    private var outputVolume: Float = 1.0f
+
+    fun setOutputVolume(volume: Float) {
+        outputVolume = volume.coerceIn(0.1f, 1.0f)
+        runCatching { activeTrack?.setVolume(outputVolume) }
+    }
+
     @Synchronized
     fun initialize(
         sampleRateHz: Int = DEFAULT_OUTPUT_SAMPLE_RATE_HZ,
@@ -101,6 +109,7 @@ class AudioPlaybackManager(
                 return
             }
 
+            runCatching { track.setVolume(outputVolume) }
             track.play()
             activeTrack = track
             isInitialized.set(true)

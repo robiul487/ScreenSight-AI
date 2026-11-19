@@ -184,6 +184,7 @@ enum class GeminiVoice(val voiceName: String, val description: String) {
 
 data class AppSettings(
     val selectedModelId: String = GeminiLiveModel.DEFAULT_MODEL.id,
+    val fallbackModelId: String = GeminiLiveModel.FALLBACK_MODEL.id,
     val selectedVoiceName: String = GeminiVoice.AOEDE.voiceName,
     val responseModalities: List<String> = listOf("AUDIO"),
     val preferredLanguage: String = "Auto-detect (Match user language)",
@@ -194,13 +195,34 @@ data class AppSettings(
     val themePreference: ThemePreference = ThemePreference.DARK,
     val dynamicColorEnabled: Boolean = false,
     val hapticFeedbackEnabled: Boolean = true,
+    val soundEffectsEnabled: Boolean = true,
+    val animationsEnabled: Boolean = true,
+    val defaultLandingScreen: String = "home",
     val hasAcceptedPrivacyNotice: Boolean = false,
     val lastSessionSummary: String = "No session recorded yet",
     val agentMode: AgentMode = AgentMode.STANDARD_AGENT,
     val agentToolsEnabled: Boolean = true,
+    val maxTaskSteps: Int = 12,
+    val maxActionRetries: Int = 2,
+    val agentToolTimeoutSec: Int = 12,
+    val autoCheckpointRecoveryEnabled: Boolean = true,
+    val backgroundAutomationEnabled: Boolean = true,
+    val voiceInputEnabled: Boolean = true,
+    val voiceOutputEnabled: Boolean = true,
+    val ttsSpeechRate: Float = 0.95f,
+    val voiceOutputVolume: Float = 1.0f,
+    val bargeInInterruptEnabled: Boolean = true,
     val lastAgentTaskSummary: String = "No agent task recorded yet",
     val memoryEnabled: Boolean = true,
-    val proactiveSuggestionsEnabled: Boolean = true
+    val defaultMemoryRetention: String = "NEVER",
+    val autoMemoryProposalsEnabled: Boolean = true,
+    val autoSkillProposalsEnabled: Boolean = true,
+    val proactiveSuggestionsEnabled: Boolean = true,
+    val taskNotificationsEnabled: Boolean = true,
+    val completionNotificationsEnabled: Boolean = true,
+    val failureNotificationsEnabled: Boolean = true,
+    val scheduledTaskNotificationsEnabled: Boolean = true,
+    val notificationVibrationEnabled: Boolean = true
 ) {
     companion object {
         const val DEFAULT_SYSTEM_INSTRUCTION = """You are ScreenSight AI, a real-time visual assistant.

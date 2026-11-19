@@ -1,10 +1,13 @@
 package com.example.ui
 
+import android.content.Context
 import android.content.Intent
+import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.AppContainer
+import com.example.BuildConfig
 import com.example.agent.AgentAccessibilityService
 import com.example.agent.AgentActionRequest
 import com.example.agent.AgentActionType
@@ -33,6 +36,7 @@ import com.example.data.local.ApiKeyRepository
 import com.example.data.local.ApiKeySource
 import com.example.data.local.ApiKeyStorage
 import com.example.data.local.SettingsRepository
+import com.example.data.local.checkpoint.AgentCheckpointDatabase
 import com.example.data.local.checkpoint.RecoverableTaskCheckpoint
 import com.example.data.local.memory.AgentMemoryRecord
 import com.example.data.local.memory.AgentMemoryRepository
@@ -77,7 +81,19 @@ sealed class ApiValidationUiState {
     data class Invalid(val error: ScreenSightError) : ApiValidationUiState()
 }
 
+data class LocalStorageSnapshot(
+    val databaseSizeBytes: Long = 0L,
+    val cacheSizeBytes: Long = 0L,
+    val memoryCount: Int = 0,
+    val skillCount: Int = 0,
+    val taskCount: Int = 0,
+    val scheduleCount: Int = 0,
+    val toolMetricCount: Int = 0
+)
+
 class ScreenSightViewModel(
+    private val appContext: Context,
+    private val checkpointDatabase: AgentCheckpointDatabase,
     private val apiKeyRepository: ApiKeyStorage,
     private val settingsRepository: SettingsRepository,
     private val geminiLiveRepository: GeminiLiveRepository,
@@ -226,9 +242,16 @@ class ScreenSightViewModel(
     private val _showFirstSessionPrivacyDialog = MutableStateFlow(false)
     val showFirstSessionPrivacyDialog: StateFlow<Boolean> = _showFirstSessionPrivacyDialog.asStateFlow()
 
+    private val _storageSnapshot = MutableStateFlow(LocalStorageSnapshot())
+    val storageSnapshot: StateFlow<LocalStorageSnapshot> = _storageSnapshot.asStateFlow()
+
+    private val _settingsFeedbackMessage = MutableStateFlow<String?>(null)
+    val settingsFeedbackMessage: StateFlow<String?> = _settingsFeedbackMessage.asStateFlow()
+
     init {
         refreshPermissions()
         refreshDynamicToolsAndMetrics()
+        refreshStorageSnapshot()
     }
 
     fun refreshPermissions() {
@@ -311,6 +334,13 @@ class ScreenSightViewModel(
         }
     }
 
+    fun selectFallbackModel(modelId: String) {
+        viewModelScope.launch {
+            settingsRepository.updateFallbackModel(modelId)
+            _settingsFeedbackMessage.value = "Fallback model updated."
+        }
+    }
+
     fun selectVoice(voiceName: String) {
         viewModelScope.launch {
             settingsRepository.updateSelectedVoice(voiceName)
@@ -353,6 +383,31 @@ class ScreenSightViewModel(
         }
     }
 
+    fun updateSoundEffects(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.updateSoundEffects(enabled)
+        }
+    }
+
+    fun updateAnimationsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.updateAnimationsEnabled(enabled)
+        }
+    }
+
+    fun updateDefaultLandingScreen(route: String) {
+        viewModelScope.launch {
+            settingsRepository.updateDefaultLandingScreen(route)
+        }
+    }
+
+    fun resetUiPreferences() {
+        viewModelScope.launch {
+            settingsRepository.resetUiPreferences()
+            _settingsFeedbackMessage.value = "UI preferences restored to defaults."
+        }
+    }
+
     fun updateAgentMode(mode: AgentMode) {
         viewModelScope.launch {
             settingsRepository.updateAgentMode(mode)
@@ -363,6 +418,207 @@ class ScreenSightViewModel(
         viewModelScope.launch {
             settingsRepository.updateAgentToolsEnabled(enabled)
         }
+    }
+
+    fun updateAgentExecutionLimits(maxSteps: Int, maxRetries: Int, timeoutSec: Int) {
+        viewModelScope.launch {
+            settingsRepository.updateAgentExecutionLimits(maxSteps, maxRetries, timeoutSec)
+        }
+    }
+
+    fun updateAutoCheckpointRecovery(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.updateAutoCheckpointRecovery(enabled)
+        }
+    }
+
+    fun updateBackgroundAutomationEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.updateBackgroundAutomationEnabled(enabled)
+            if (!enabled) {
+                taskScheduler.cancelAllBackgroundWork()
+            }
+        }
+    }
+
+    fun updateVoiceAudioPreferences(
+        voiceInputEnabled: Boolean? = null,
+        voiceOutputEnabled: Boolean? = null,
+        ttsSpeechRate: Float? = null,
+        voiceOutputVolume: Float? = null,
+        bargeInInterruptEnabled: Boolean? = null
+    ) {
+        viewModelScope.launch {
+            settingsRepository.updateVoiceAudioPreferences(
+                voiceInputEnabled = voiceInputEnabled,
+                voiceOutputEnabled = voiceOutputEnabled,
+                ttsSpeechRate = ttsSpeechRate,
+                voiceOutputVolume = voiceOutputVolume,
+                bargeInInterruptEnabled = bargeInInterruptEnabled
+            )
+            voiceInputEnabled?.let { enabled ->
+                if (!enabled && !sessionManager.audioCaptureManager.isMuted.value) {
+                    sessionManager.toggleMicrophoneMute()
+                }
+            }
+            voiceOutputEnabled?.let { enabled ->
+                if (!enabled && !sessionManager.audioPlaybackManager.isAiMuted.value) {
+                    sessionManager.toggleAiAudioMute()
+                } else if (enabled && sessionManager.audioPlaybackManager.isAiMuted.value) {
+                    sessionManager.toggleAiAudioMute()
+                }
+            }
+        }
+    }
+
+    fun updateDefaultMemoryRetention(policyName: String) {
+        viewModelScope.launch {
+            settingsRepository.updateDefaultMemoryRetention(policyName)
+        }
+    }
+
+    fun updateAutoMemoryProposals(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.updateAutoMemoryProposals(enabled)
+        }
+    }
+
+    fun updateAutoSkillProposals(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.updateAutoSkillProposals(enabled)
+        }
+    }
+
+    fun updateNotificationPreferences(
+        taskNotifications: Boolean? = null,
+        completionNotifications: Boolean? = null,
+        failureNotifications: Boolean? = null,
+        scheduledNotifications: Boolean? = null,
+        vibration: Boolean? = null
+    ) {
+        viewModelScope.launch {
+            settingsRepository.updateNotificationPreferences(
+                taskNotifications = taskNotifications,
+                completionNotifications = completionNotifications,
+                failureNotifications = failureNotifications,
+                scheduledNotifications = scheduledNotifications,
+                vibration = vibration
+            )
+        }
+    }
+
+    fun clearSettingsFeedback() {
+        _settingsFeedbackMessage.value = null
+    }
+
+    fun refreshStorageSnapshot() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val dbFile = appContext.getDatabasePath(AgentCheckpointDatabase.DB_NAME)
+            val dbBytes = (dbFile?.length() ?: 0L) +
+                (appContext.getDatabasePath("${AgentCheckpointDatabase.DB_NAME}-wal")?.length() ?: 0L)
+            val cacheBytes = calculateDirSize(appContext.cacheDir)
+            val memCount = runCatching { memoryRepository.getAllMemories().size }.getOrDefault(0)
+            val skCount = runCatching { skillRepository.getAllSkills().size }.getOrDefault(0)
+            val ltCount = runCatching { checkpointDatabase.longTermTaskDao().getAllTasks().size }.getOrDefault(0)
+            val schCount = runCatching { checkpointDatabase.scheduledTaskDao().getAllSchedules().size }.getOrDefault(0)
+            val metricCount = runCatching { checkpointDatabase.toolMetricDao().getRecent(200).size }.getOrDefault(0)
+            _storageSnapshot.value = LocalStorageSnapshot(
+                databaseSizeBytes = dbBytes,
+                cacheSizeBytes = cacheBytes,
+                memoryCount = memCount,
+                skillCount = skCount,
+                taskCount = ltCount,
+                scheduleCount = schCount,
+                toolMetricCount = metricCount
+            )
+        }
+    }
+
+    fun clearAppCache() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val deleted = runCatching {
+                appContext.cacheDir?.listFiles()?.count { it.deleteRecursively() } ?: 0
+            }.getOrDefault(0)
+            refreshStorageSnapshot()
+            _settingsFeedbackMessage.value = "Cleared cache ($deleted item(s) removed)."
+        }
+    }
+
+    fun deleteTaskHistory() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val all = checkpointDatabase.longTermTaskDao().getAllTasks()
+            var removed = 0
+            all.filter { it.status == "COMPLETED" || it.status == "FAILED" || it.status == "CANCELLED" }
+                .forEach {
+                    checkpointDatabase.longTermTaskDao().deleteById(it.taskId)
+                    removed++
+                }
+            agentCoordinator.clearTaskHistory()
+            agentCoordinator.taskLogger.clearLogs()
+            refreshStorageSnapshot()
+            _settingsFeedbackMessage.value = "Deleted $removed completed/failed task record(s) and cleared logs."
+        }
+    }
+
+    fun resetNonSecretLocalData() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            memoryRepository.clearAllMemories()
+            taskScheduler.cancelAllBackgroundWork()
+            checkpointDatabase.scheduledTaskDao().getAllSchedules().forEach {
+                checkpointDatabase.scheduledTaskDao().deleteById(it.scheduleId)
+            }
+            checkpointDatabase.longTermTaskDao().getAllTasks().forEach {
+                checkpointDatabase.longTermTaskDao().deleteById(it.taskId)
+            }
+            agentCoordinator.clearTaskHistory()
+            agentCoordinator.taskLogger.clearLogs()
+            settingsRepository.resetUiPreferences()
+            refreshStorageSnapshot()
+            _settingsFeedbackMessage.value = "Local memories, tasks, schedules, and UI preferences were reset. Your encrypted API key was preserved."
+        }
+    }
+
+    fun buildSanitizedExportText(): String {
+        val currentMemories = memories.value
+        val currentSkills = skills.value
+        val currentSchedules = scheduledTasks.value
+        return buildString {
+            appendLine("# ScreenSight AI Local Export (Sanitized — No API Keys or Secrets)")
+            appendLine("App Version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            appendLine("Memories (${currentMemories.size}):")
+            currentMemories.forEach { m ->
+                appendLine("  - [${m.category.name}] ${m.memoryKey}: ${m.value}")
+            }
+            appendLine("Skills (${currentSkills.size}):")
+            currentSkills.forEach { s ->
+                appendLine("  - ${s.name} (v${s.version}, enabled=${s.enabled}, steps=${s.executionSteps.size})")
+            }
+            appendLine("Schedules (${currentSchedules.size}):")
+            currentSchedules.forEach { sc ->
+                appendLine("  - ${sc.title} [${sc.recurrence.name} ${"%02d:%02d".format(sc.hourOfDay, sc.minuteOfHour)}]")
+            }
+        }
+    }
+
+    fun buildSanitizedDiagnosticsText(): String {
+        val perm = permissionsSnapshot.value
+        val cur = settings.value
+        val store = storageSnapshot.value
+        return buildString {
+            appendLine("ScreenSight AI Diagnostics (No Secrets)")
+            appendLine("Version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            appendLine("Android API: ${Build.VERSION.SDK_INT} (${Build.MODEL})")
+            appendLine("Model: ${cur.selectedModelId} | Fallback: ${cur.fallbackModelId}")
+            appendLine("API Key Status: ${if (hasApiKey.value) "Configured (${apiKeySource.value.name})" else "Not Configured"}")
+            appendLine("Permissions: Mic=${perm.hasMicrophone}, A11y=${perm.isAgentControlReady}, Overlay=${perm.canDrawOverlays}, Notif=${perm.hasNotifications}")
+            appendLine("Registered Tools: ${discoveredTools.value.size}")
+            appendLine("Local Room v3: ${store.memoryCount} memories, ${store.skillCount} skills, ${store.taskCount} tasks, ${store.scheduleCount} schedules (${store.databaseSizeBytes / 1024} KB)")
+        }
+    }
+
+    private fun calculateDirSize(dir: java.io.File?): Long {
+        if (dir == null || !dir.exists()) return 0L
+        return dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
     }
 
     // Phase 4: Local Memory & Reusable Skills Controls
@@ -894,6 +1150,8 @@ class ScreenSightViewModel(
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
                     return ScreenSightViewModel(
+                        appContext = container.appContext,
+                        checkpointDatabase = container.checkpointDatabase,
                         apiKeyRepository = container.apiKeyRepository,
                         settingsRepository = container.settingsRepository,
                         geminiLiveRepository = container.geminiLiveRepository,

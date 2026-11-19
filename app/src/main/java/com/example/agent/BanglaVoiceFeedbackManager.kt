@@ -16,14 +16,18 @@ class BanglaVoiceFeedbackManager(context: Context) {
     private var tts: TextToSpeech? = null
     @Volatile
     private var isReady: Boolean = false
+    @Volatile
+    private var speechRate: Float = 0.95f
+    @Volatile
+    private var voiceOutputEnabled: Boolean = true
 
     init {
         runCatching {
             tts = TextToSpeech(context.applicationContext) { status ->
                 if (status == TextToSpeech.SUCCESS) {
                     val engine = tts
-                    val bnBd = Locale("bn", "BD")
-                    val bnIn = Locale("bn", "IN")
+                    val bnBd = Locale.Builder().setLanguage("bn").setRegion("BD").build()
+                    val bnIn = Locale.Builder().setLanguage("bn").setRegion("IN").build()
                     val res = engine?.setLanguage(bnBd)
                     if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
                         val resIn = engine?.setLanguage(bnIn)
@@ -31,15 +35,25 @@ class BanglaVoiceFeedbackManager(context: Context) {
                             engine?.setLanguage(Locale.getDefault())
                         }
                     }
-                    engine?.setSpeechRate(0.95f)
+                    engine?.setSpeechRate(speechRate)
                     isReady = true
                 }
             }
         }
     }
 
+    fun setSpeechRate(rate: Float) {
+        speechRate = rate.coerceIn(0.6f, 1.5f)
+        runCatching { tts?.setSpeechRate(speechRate) }
+    }
+
+    fun setVoiceOutputEnabled(enabled: Boolean) {
+        voiceOutputEnabled = enabled
+        if (!enabled) stopSpeaking()
+    }
+
     fun speakIfIdle(text: String, isGeminiLiveAudioActive: Boolean) {
-        if (isGeminiLiveAudioActive || !isReady || text.isBlank()) return
+        if (!voiceOutputEnabled || isGeminiLiveAudioActive || !isReady || text.isBlank()) return
         runCatching {
             tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "screensight_local_feedback")
         }
