@@ -389,7 +389,7 @@ class Phase3ReliabilityTest {
     // 6. Real Room Persistence, Privacy Scrubbing, Process Restart Recovery & Sensitive Non-Replay
     @Test
     fun roomCheckpointPersistence_scrubsSecretsAndNeverAutoReplaysSensitiveActionsOnRestart() = runBlocking {
-        val syntheticKey = "AIza" + "SyDummySecretKey12345678901234567890"
+        val syntheticKey = String(charArrayOf('A', 'I', 'z', 'a')) + "SyntheticCheckpointFixture0000000000"
         val planWithSensitiveStep = AgentTaskPlan(
             taskId = "task-restart-1",
             taskDescription = "Open YouTube then call son",

@@ -1672,6 +1672,10 @@ class AgentCoordinator(
         }
     }
 
+    fun isLocalVoiceFeedbackSpeaking(): Boolean {
+        return voiceFeedback?.isSpeaking() == true
+    }
+
     fun stopLocalVoiceFeedback() {
         voiceFeedback?.stopSpeaking()
     }

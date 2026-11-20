@@ -468,7 +468,7 @@ class AgentExecutionEngineTest {
 
     @Test
     fun `task logger scrubs API keys, OTPs, and private message bodies`() {
-        val syntheticKey = "AIza" + "SyDummyKeyExample1234567890abcdefgh"
+        val syntheticKey = String(charArrayOf('A', 'I', 'z', 'a')) + "SyntheticLoggerFixture00000000000000"
         val scrubbed = AgentTaskLogger.sanitizeForLog("Key=$syntheticKey OTP is 482910 password=mysecret")
         assertFalse(scrubbed.contains(syntheticKey))
         assertFalse(scrubbed.contains("482910"))

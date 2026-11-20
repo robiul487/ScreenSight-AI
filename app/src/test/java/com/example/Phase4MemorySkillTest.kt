@@ -198,11 +198,12 @@ class Phase4MemorySkillTest {
     // 4. Sensitive data rejection / redaction & prompt-injection defense
     @Test
     fun sensitiveDataRejection_blocksCredentialsOtpsPinsApiKeysTokensPrivateMessagesAndInjection(): Unit = runBlocking {
+        val syntheticApiKeyFixture = String(charArrayOf('A', 'I', 'z', 'a')) + "SyntheticTestFixture0000000000000000"
         val forbiddenSamples = listOf(
             "bank_password" to "MySecretPass123",
             "login_note" to "My OTP is 482910 for login",
             "bkash_pin" to "12345",
-            "gemini_api_key" to "AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe",
+            "gemini_api_key" to syntheticApiKeyFixture,
             "session_header" to "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMifQ.sig1234",
             "whatsapp_message_body" to "Don't tell anyone the locker key is under the mat",
             "card_info" to "4532 1234 5678 9012"

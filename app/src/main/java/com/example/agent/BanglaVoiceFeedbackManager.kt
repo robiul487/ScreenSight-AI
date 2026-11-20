@@ -59,6 +59,8 @@ class BanglaVoiceFeedbackManager(context: Context) {
         }
     }
 
+    fun isSpeaking(): Boolean = runCatching { tts?.isSpeaking == true }.getOrDefault(false)
+
     fun stopSpeaking() {
         runCatching { tts?.stop() }
     }

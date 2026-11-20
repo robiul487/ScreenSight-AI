@@ -97,6 +97,9 @@ class SessionManager(
     private var sessionJob: Job? = null
     private var reconnectJob: Job? = null
     private val pendingUserVoiceBuffer = StringBuilder()
+    private val recentAiOutputBuffer = StringBuilder()
+    @Volatile
+    private var lastAiOutputAtMs: Long = 0L
 
     init {
         scope.launch {
@@ -276,6 +279,11 @@ class SessionManager(
 
             is GeminiServerEvent.TextDelta -> {
                 if (event.isUserTranscript && event.text.isNotBlank()) {
+                    val elapsedSinceAiMs = System.currentTimeMillis() - lastAiOutputAtMs
+                    val recentAiText = recentAiOutputBuffer.toString()
+                    if (isLikelySelfEchoTranscript(event.text, recentAiText, elapsedSinceAiMs)) {
+                        return
+                    }
                     pendingUserVoiceBuffer.append(event.text)
                     // Fast-path natural Bangla/English voice confirmation while WAITING_FOR_USER
                     if (agentCoordinator?.pendingConfirmation?.value != null) {
@@ -288,6 +296,12 @@ class SessionManager(
                             pendingUserVoiceBuffer.clear()
                         }
                     }
+                } else if (!event.isUserTranscript && event.text.isNotBlank()) {
+                    if (recentAiOutputBuffer.length > 600) {
+                        recentAiOutputBuffer.delete(0, recentAiOutputBuffer.length - 300)
+                    }
+                    recentAiOutputBuffer.append(event.text)
+                    lastAiOutputAtMs = System.currentTimeMillis()
                 }
                 appendOrUpdateStreamingTranscript(
                     sender = if (event.isUserTranscript) MessageSender.USER else MessageSender.GEMINI,
@@ -297,7 +311,11 @@ class SessionManager(
 
             is GeminiServerEvent.TurnComplete -> {
                 if (pendingUserVoiceBuffer.isNotBlank()) {
-                    agentCoordinator?.onUserRequestReceived(pendingUserVoiceBuffer.toString())
+                    val utterance = pendingUserVoiceBuffer.toString()
+                    val elapsedSinceAiMs = System.currentTimeMillis() - lastAiOutputAtMs
+                    if (!isLikelySelfEchoTranscript(utterance, recentAiOutputBuffer.toString(), elapsedSinceAiMs)) {
+                        agentCoordinator?.onUserRequestReceived(utterance)
+                    }
                     pendingUserVoiceBuffer.clear()
                 }
                 finalizeStreamingTranscript()
@@ -388,14 +406,23 @@ class SessionManager(
         val model = GeminiLiveModel.findByIdOrCustom(latestSettings.selectedModelId)
         audioCaptureManager.startRecording(
             sampleRateHz = model.inputSampleRateHz,
-            isAiCurrentlySpeaking = { audioPlaybackManager.isAiSpeaking.value },
+            isAiCurrentlySpeaking = {
+                audioPlaybackManager.isEchoGuardActive.value ||
+                    (agentCoordinator?.isLocalVoiceFeedbackSpeaking() == true)
+            },
+            aiOutputRmsProvider = { audioPlaybackManager.currentOutputRms.value },
+            isHeadsetConnected = { audioPlaybackManager.isExternalAudioDeviceConnected() },
+            isBargeInEnabled = { latestSettings.bargeInInterruptEnabled },
             onAudioChunk = { pcmChunk, rate ->
                 if (geminiRepository.isSessionActive()) {
                     geminiRepository.sendAudioChunk(pcmChunk, rate)
                 }
             },
             onUserVoiceDetected = { wasBargeInWhileAiSpeaking ->
-                if (wasBargeInWhileAiSpeaking && audioPlaybackManager.isAiSpeaking.value) {
+                if (wasBargeInWhileAiSpeaking &&
+                    latestSettings.bargeInInterruptEnabled &&
+                    audioPlaybackManager.isAiSpeaking.value
+                ) {
                     audioPlaybackManager.interruptPlayback()
                     agentCoordinator?.onUserInterruption(preservePendingConfirmation = true)
                 }
@@ -688,6 +715,8 @@ class SessionManager(
     private fun cleanupActiveStreams(stopService: Boolean) {
         _isSharingScreen.value = false
         _isScreenCapturePaused.value = false
+        recentAiOutputBuffer.clear()
+        lastAiOutputAtMs = 0L
         if (stopService) {
             runCatching { ScreenCaptureService.stopEntireSessionService(appContext) }
         }
@@ -737,5 +766,31 @@ class SessionManager(
     companion object {
         private const val MAX_RECONNECT_ATTEMPTS = 3
         private const val MAX_TRANSCRIPT_MESSAGES = 100
+        private const val SELF_ECHO_TRANSCRIPT_WINDOW_MS = 2_500L
+
+        /**
+         * Belt-and-suspenders textual echo detector: catches residual echo fragments that closely
+         * mirror the AI's own spoken output within [SELF_ECHO_TRANSCRIPT_WINDOW_MS], while never
+         * suppressing distinct user or remote caller sentences.
+         */
+        fun isLikelySelfEchoTranscript(
+            userTranscript: String,
+            recentAiTranscript: String,
+            elapsedSinceAiSpeechMs: Long
+        ): Boolean {
+            if (elapsedSinceAiSpeechMs !in 0L..SELF_ECHO_TRANSCRIPT_WINDOW_MS) return false
+            val userClean = userTranscript.trim().lowercase().replace(Regex("[^\\p{L}\\p{N}\\s]"), " ")
+            val aiClean = recentAiTranscript.trim().lowercase().replace(Regex("[^\\p{L}\\p{N}\\s]"), " ")
+            if (userClean.length < 8 || aiClean.isBlank()) return false
+
+            val userWords = userClean.split(Regex("\\s+")).filter { it.length >= 2 }
+            if (userWords.size < 3) return false
+            val aiWords = aiClean.split(Regex("\\s+")).filter { it.length >= 2 }.toSet()
+            if (aiWords.isEmpty()) return false
+
+            val overlap = userWords.count { it in aiWords }
+            val ratio = overlap.toFloat() / userWords.size.toFloat()
+            return ratio >= 0.80f
+        }
     }
 }
