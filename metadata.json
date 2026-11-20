@@ -1,6 +1,6 @@
 {
   "name": "ScreenSight AI",
-  "description": "Open-source Gemini Live screen-sharing and real-time voice assistant for Android.",
+  "description": "Open-source Autonomous Android Mobile Agent Command Hub featuring Dual-Mode Gemini Live + Gemma 4 reasoning, local memory & skills, mission management, and Neya native digital assistant.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -409,6 +409,19 @@ class NeyaAssistantController(
         val trimmed = rawText.trim()
         if (trimmed.isEmpty()) return AssistantCommandResult.EmptyInput
 
+        val preflightSafety = com.example.agent.AgentSafetyManager.evaluate(
+            request = AgentActionRequest(
+                actionType = AgentActionType.CLICK_ELEMENT,
+                parameters = mapOf("command" to trimmed),
+                reason = trimmed
+            )
+        )
+        if (preflightSafety.isBlocked) {
+            val summary = "Blocked by safety policy: ${preflightSafety.reasonEn}"
+            _state.update { it.copy(lastCommandSummary = summary, lastStatusNote = summary) }
+            return AssistantCommandResult.BlockedOrFailed(summary)
+        }
+
         if (sessionManager.sessionState.value.isActive) {
             sessionManager.sendUserTextMessage(trimmed)
             val summary = "Sent to active Gemini Live session: \"$trimmed\""
