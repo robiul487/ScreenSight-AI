@@ -3,6 +3,8 @@ package com.example.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddAlarm
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
@@ -31,6 +34,7 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -41,9 +45,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -57,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.agent.AgentExecutionState
 import com.example.agent.AgentTaskPlan
@@ -190,6 +195,12 @@ fun TasksScreen(
                 onOpenDrawer = onOpenDrawer,
                 actions = {
                     AppIconButton(
+                        icon = Icons.Default.AddAlarm,
+                        contentDescription = "Create Scheduled Task",
+                        onClick = { showCreateScheduleDialog = true },
+                        modifier = Modifier.testTag("tasks_top_schedule_button")
+                    )
+                    AppIconButton(
                         icon = Icons.Default.AutoAwesome,
                         contentDescription = "Tools and Multi-Agent Diagnostics",
                         onClick = onOpenToolsAndDiagnostics,
@@ -217,34 +228,65 @@ fun TasksScreen(
                     testTag = "tasks_feedback_banner"
                 )
 
-                ScrollableTabRow(
+                TabRow(
                     selectedTabIndex = selectedTab,
-                    edgePadding = 16.dp,
                     containerColor = MaterialTheme.colorScheme.background
                 ) {
                     Tab(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
                         modifier = Modifier.testTag("tasks_tab_active"),
-                        text = { Text("Active (${activeTasks.size + recoverableCheckpoints.size})") }
+                        text = {
+                            Text(
+                                text = "Active (${activeTasks.size + recoverableCheckpoints.size})",
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     )
                     Tab(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
                         modifier = Modifier.testTag("tasks_tab_scheduled"),
-                        text = { Text("Scheduled (${scheduledTasks.size})") }
+                        text = {
+                            Text(
+                                text = "Sched (${scheduledTasks.size})",
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     )
                     Tab(
                         selected = selectedTab == 2,
                         onClick = { selectedTab = 2 },
                         modifier = Modifier.testTag("tasks_tab_completed"),
-                        text = { Text("Completed (${completedTasks.size})") }
+                        text = {
+                            Text(
+                                text = "Done (${completedTasks.size})",
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     )
                     Tab(
                         selected = selectedTab == 3,
                         onClick = { selectedTab = 3 },
                         modifier = Modifier.testTag("tasks_tab_failed"),
-                        text = { Text("Failed (${failedTasks.size})") }
+                        text = {
+                            Text(
+                                text = "Failed (${failedTasks.size})",
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     )
                 }
 
@@ -259,6 +301,10 @@ fun TasksScreen(
                                 goalInput = ""
                             }
                         },
+                        onQuickRunStarter = { starterGoal ->
+                            onCreateGoalTask(starterGoal)
+                        },
+                        onOpenCreateSchedule = { showCreateScheduleDialog = true },
                         activeAgentPlan = activeAgentPlan,
                         agentExecutionState = agentExecutionState,
                         recoverableCheckpoints = recoverableCheckpoints,
@@ -307,11 +353,14 @@ fun TasksScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ActiveTasksTabContent(
     goalInput: String,
     onGoalInputChange: (String) -> Unit,
     onSubmitGoal: () -> Unit,
+    onQuickRunStarter: (String) -> Unit,
+    onOpenCreateSchedule: () -> Unit,
     activeAgentPlan: AgentTaskPlan?,
     agentExecutionState: AgentExecutionState,
     recoverableCheckpoints: List<RecoverableTaskCheckpoint>,
@@ -359,6 +408,39 @@ private fun ActiveTasksTabContent(
                         .fillMaxWidth()
                         .testTag("tasks_create_goal_button")
                 )
+                Text(
+                    text = "Quick Starter Missions",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    AssistChip(
+                        onClick = { onQuickRunStarter("Check date and time") },
+                        label = { Text("Check time") },
+                        modifier = Modifier.testTag("task_starter_time")
+                    )
+                    AssistChip(
+                        onClick = { onQuickRunStarter("Open YouTube") },
+                        label = { Text("Open YouTube") },
+                        modifier = Modifier.testTag("task_starter_youtube")
+                    )
+                    AssistChip(
+                        onClick = { onQuickRunStarter("Read current screen") },
+                        label = { Text("Scan screen") },
+                        modifier = Modifier.testTag("task_starter_screen")
+                    )
+                    AssistChip(
+                        onClick = onOpenCreateSchedule,
+                        label = { Text("+ Schedule") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(16.dp))
+                        },
+                        modifier = Modifier.testTag("task_starter_schedule")
+                    )
+                }
             }
         }
 

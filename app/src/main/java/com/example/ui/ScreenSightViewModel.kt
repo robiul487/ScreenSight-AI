@@ -3,6 +3,8 @@ package com.example.ui
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.provider.Settings
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -53,6 +55,7 @@ import com.example.data.local.skill.AgentSkillRepository
 import com.example.data.local.skill.SkillProposal
 import com.example.data.repository.GeminiLiveRepository
 import com.example.domain.model.AppSettings
+import com.example.domain.model.AutonomyLevel
 import com.example.domain.model.ConnectionQuality
 import com.example.domain.model.GeminiLiveModel
 import com.example.domain.model.LiveSessionState
@@ -64,6 +67,7 @@ import com.example.domain.usecase.StartAudioUseCase
 import com.example.domain.usecase.StartSessionUseCase
 import com.example.domain.usecase.StopSessionUseCase
 import com.example.service.AgentTaskScheduler
+import com.example.service.ScreenCaptureService
 import com.example.service.SessionManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -412,6 +416,81 @@ class ScreenSightViewModel(
         viewModelScope.launch {
             settingsRepository.updateAgentMode(mode)
         }
+    }
+
+    fun updateAutonomyLevel(level: AutonomyLevel) {
+        viewModelScope.launch {
+            settingsRepository.updateAutonomyLevel(level)
+            _settingsFeedbackMessage.value = "Autonomy level set to ${level.title}."
+        }
+    }
+
+    /**
+     * Launches the Floating Agent Overlay pill over other apps if overlay permission is granted.
+     * Returns true if started, or false if the Activity should route the user to Android Overlay settings.
+     */
+    fun launchFloatingAgentOverlay(): Boolean {
+        val canDraw = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(appContext)
+        if (!canDraw) {
+            _autonomousFeedbackMessage.value = "Enable 'Display over other apps' to launch the Floating Agent pill."
+            return false
+        }
+        val intent = Intent(appContext, ScreenCaptureService::class.java).apply {
+            action = ScreenCaptureService.ACTION_START_VOICE_SESSION
+        }
+        runCatching {
+            ContextCompat.startForegroundService(appContext, intent)
+        }
+        if (hasApiKey.value && !sessionState.value.isActive) {
+            startSessionUseCase()
+        }
+        _autonomousFeedbackMessage.value = "Floating Agent Overlay launched."
+        return true
+    }
+
+    /**
+     * Dual-Mode Agent Tab command dispatcher:
+     * - When Gemini Live is active, forwards the text turn to the live multimodal session.
+     * - When idle, plans & runs an instant on-device autonomous task without requiring screen sharing.
+     * Returns true if sent to Gemini Live, or false if executed locally on device.
+     */
+    fun submitAgentTabInstruction(rawText: String): Boolean {
+        val trimmed = rawText.trim()
+        if (trimmed.isEmpty()) return false
+        if (sessionState.value.isActive) {
+            sendTextMessageUseCase(trimmed)
+            return true
+        }
+        agentCoordinator.onUserRequestReceived(trimmed)
+        val lower = trimmed.lowercase()
+        when {
+            lower.contains("time") || lower.contains("date") || lower.contains("কয়টা") || lower.contains("তারিখ") -> {
+                agentCoordinator.executeDirectQuickAction(
+                    AgentActionRequest(actionType = AgentActionType.GET_DATE_TIME),
+                    isGeminiAudioActive = false
+                )
+            }
+            lower.contains("read screen") || lower.contains("স্ক্রিন পড়") || lower.contains("scan screen") -> {
+                agentCoordinator.executeDirectQuickAction(
+                    AgentActionRequest(actionType = AgentActionType.READ_SCREEN),
+                    isGeminiAudioActive = false
+                )
+            }
+            lower.startsWith("open ") && trimmed.length > 5 -> {
+                val appTarget = trimmed.substring(5).trim()
+                agentCoordinator.executeDirectQuickAction(
+                    AgentActionRequest(
+                        actionType = AgentActionType.OPEN_APP,
+                        parameters = mapOf("app_name" to appTarget)
+                    ),
+                    isGeminiAudioActive = false
+                )
+            }
+            else -> {
+                createAndRunMultiStageGoal(trimmed)
+            }
+        }
+        return false
     }
 
     fun updateAgentToolsEnabled(enabled: Boolean) {

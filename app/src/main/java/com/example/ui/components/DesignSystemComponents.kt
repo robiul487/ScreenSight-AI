@@ -681,7 +681,12 @@ fun AgentStatusCard(
     microphoneReady: Boolean,
     screenCaptureLabel: String,
     onOpenPermissions: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    overlayReady: Boolean = false,
+    onClickApi: () -> Unit = onOpenPermissions,
+    onClickControl: () -> Unit = onOpenPermissions,
+    onClickMic: () -> Unit = onOpenPermissions,
+    onClickOverlay: () -> Unit = onOpenPermissions
 ) {
     FeatureCard(modifier = modifier, onClick = onOpenPermissions) {
         Row(
@@ -719,13 +724,19 @@ fun AgentStatusCard(
                 label = "API",
                 value = apiStatusLabel,
                 isOk = apiStatusLabel != "Missing",
-                modifier = Modifier.weight(1f)
+                onClick = onClickApi,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("readiness_chip_api")
             )
             CompactCapabilityPill(
                 label = "Control",
-                value = if (accessibilityReady) "Active" else "Off",
+                value = if (accessibilityReady) "Active" else "Fix",
                 isOk = accessibilityReady,
-                modifier = Modifier.weight(1f)
+                onClick = onClickControl,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("readiness_chip_control")
             )
         }
         Row(
@@ -734,15 +745,21 @@ fun AgentStatusCard(
         ) {
             CompactCapabilityPill(
                 label = "Mic",
-                value = if (microphoneReady) "Granted" else "Off",
+                value = if (microphoneReady) "Granted" else "Grant",
                 isOk = microphoneReady,
-                modifier = Modifier.weight(1f)
+                onClick = onClickMic,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("readiness_chip_mic")
             )
             CompactCapabilityPill(
-                label = "Screen",
-                value = screenCaptureLabel,
-                isOk = screenCaptureLabel == "Sharing",
-                modifier = Modifier.weight(1f)
+                label = "Overlay",
+                value = if (overlayReady) screenCaptureLabel else "Enable",
+                isOk = overlayReady,
+                onClick = onClickOverlay,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("readiness_chip_overlay")
             )
         }
     }
@@ -753,16 +770,34 @@ private fun CompactCapabilityPill(
     label: String,
     value: String,
     isOk: Boolean,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val dotColor = if (isOk) EmeraldLive else AmberThinking
     Surface(
-        modifier = modifier,
+        modifier = modifier
+            .heightIn(min = 48.dp)
+            .clip(MaterialTheme.shapes.small)
+            .clickable(onClick = onClick),
         shape = MaterialTheme.shapes.small,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+        color = if (isOk) {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+        } else {
+            AmberThinking.copy(alpha = 0.12f)
+        },
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (isOk) {
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+            } else {
+                AmberThinking.copy(alpha = 0.45f)
+            }
+        )
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
@@ -775,9 +810,11 @@ private fun CompactCapabilityPill(
             Text(
                 text = "$label: $value",
                 style = MaterialTheme.typography.labelSmall,
+                fontWeight = if (isOk) FontWeight.Medium else FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
             )
         }
     }

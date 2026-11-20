@@ -86,8 +86,29 @@ class AgentCoordinator(
     private val dynamicToolManager: DynamicToolManager? = null,
     private val selfReflectionEngine: SelfReflectionEngine? = null
 ) {
+    @Volatile
+    var autonomyLevel: com.example.domain.model.AutonomyLevel = com.example.domain.model.AutonomyLevel.BALANCED
+        private set
+
     fun updateExecutionConfig(newConfig: AgentExecutionConfig) {
         config = newConfig
+    }
+
+    fun updateAutonomyLevel(level: com.example.domain.model.AutonomyLevel) {
+        autonomyLevel = level
+    }
+
+    private fun requiresExtraAutonomyConfirmation(request: AgentActionRequest): Boolean {
+        if (autonomyLevel != com.example.domain.model.AutonomyLevel.ASK_FIRST) return false
+        return when (request.actionType) {
+            AgentActionType.GET_DATE_TIME,
+            AgentActionType.READ_SCREEN,
+            AgentActionType.GET_SCREEN_STATE,
+            AgentActionType.GET_CURRENT_APP,
+            AgentActionType.VERIFY_SCREEN,
+            AgentActionType.WAIT_FOR_UI -> false
+            else -> true
+        }
     }
     enum class VoiceConfirmationOutcome {
         NO_PENDING_CONFIRMATION,
@@ -696,13 +717,23 @@ class AgentCoordinator(
         var effectiveRequest = request
         var userConfirmed = false
 
-        if (safety.requiresConfirmation) {
+        if (safety.requiresConfirmation || requiresExtraAutonomyConfirmation(request)) {
+            val confirmReasonEn = if (safety.requiresConfirmation) {
+                safety.reasonEn
+            } else {
+                "Ask-First autonomy mode: please confirm before running ${request.actionType.displayLabelEn}."
+            }
+            val confirmReasonBn = if (safety.requiresConfirmation) {
+                safety.reasonBn
+            } else {
+                "Ask-First মোড চালু আছে: ${request.actionType.displayLabelEn} চালানোর আগে অনুমতি দিন।"
+            }
             val previewPair = actionExecutor?.buildConfirmationPreview(request)
                 ?: (PendingConfirmation(
                     callId = request.callId,
                     actionRequest = request,
-                    promptEn = safety.reasonEn,
-                    promptBn = safety.reasonBn,
+                    promptEn = confirmReasonEn,
+                    promptBn = confirmReasonBn,
                     previewDetail = request.actionType.displayLabelEn
                 ) to null)
             val (preview, earlyFailure) = previewPair

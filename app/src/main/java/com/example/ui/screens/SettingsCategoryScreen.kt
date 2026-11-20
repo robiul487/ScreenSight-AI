@@ -78,6 +78,7 @@ import com.example.agent.AgentTaskLogger
 import com.example.data.local.ApiKeySource
 import com.example.data.local.memory.MemoryExpirationPolicy
 import com.example.domain.model.AppSettings
+import com.example.domain.model.AutonomyLevel
 import com.example.domain.model.GeminiVoice
 import com.example.domain.model.ThemePreference
 import com.example.ui.LocalStorageSnapshot
@@ -139,6 +140,7 @@ fun SettingsCategoryScreen(
     onStopScreenShare: () -> Unit,
     // Agent Behavior (E)
     onSelectAgentMode: (AgentMode) -> Unit,
+    onSelectAutonomyLevel: (AutonomyLevel) -> Unit = {},
     onToggleAgentTools: (Boolean) -> Unit,
     onUpdateAgentLimits: (maxSteps: Int, maxRetries: Int, timeoutSec: Int) -> Unit,
     onToggleAutoCheckpointRecovery: (Boolean) -> Unit,
@@ -619,6 +621,24 @@ fun SettingsCategoryScreen(
                                         )
                                     }
                                 }
+
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text("Autonomy Policy", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    AutonomyLevel.entries.forEach { level ->
+                                        FilterChip(
+                                            selected = settings.autonomyLevel == level,
+                                            onClick = { onSelectAutonomyLevel(level) },
+                                            label = { Text(level.shortLabel) },
+                                            modifier = Modifier.testTag("settings_autonomy_${level.name.lowercase()}")
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = settings.autonomyLevel.description,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
                             SettingsToggleItem(

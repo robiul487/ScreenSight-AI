@@ -12,6 +12,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.agent.AgentMode
 import com.example.domain.model.AppSettings
+import com.example.domain.model.AutonomyLevel
 import com.example.domain.model.GeminiLiveModel
 import com.example.domain.model.GeminiVoice
 import com.example.domain.model.ThemePreference
@@ -57,6 +58,8 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
 
         val modeStr = prefs[KEY_AGENT_MODE] ?: AgentMode.STANDARD_AGENT.name
         val agentMode = runCatching { AgentMode.valueOf(modeStr) }.getOrDefault(AgentMode.STANDARD_AGENT)
+        val autonomyStr = prefs[KEY_AUTONOMY_LEVEL] ?: AutonomyLevel.BALANCED.name
+        val autonomyLevel = runCatching { AutonomyLevel.valueOf(autonomyStr) }.getOrDefault(AutonomyLevel.BALANCED)
 
         AppSettings(
             selectedModelId = activeModelId,
@@ -77,6 +80,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             hasAcceptedPrivacyNotice = prefs[KEY_PRIVACY_ACCEPTED] ?: false,
             lastSessionSummary = prefs[KEY_LAST_SESSION_SUMMARY] ?: "No session recorded yet",
             agentMode = agentMode,
+            autonomyLevel = autonomyLevel,
             agentToolsEnabled = prefs[KEY_AGENT_TOOLS_ENABLED] ?: true,
             maxTaskSteps = (prefs[KEY_MAX_TASK_STEPS] ?: 12).coerceIn(4, 30),
             maxActionRetries = (prefs[KEY_MAX_ACTION_RETRIES] ?: 2).coerceIn(0, 5),
@@ -185,7 +189,25 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
     }
 
     suspend fun updateAgentMode(mode: AgentMode) {
-        editPrefs { it[KEY_AGENT_MODE] = mode.name }
+        editPrefs {
+            it[KEY_AGENT_MODE] = mode.name
+            if (mode == AgentMode.FAMILY_EASY_MODE) {
+                it[KEY_AUTONOMY_LEVEL] = AutonomyLevel.FAMILY_EASY.name
+            } else if (it[KEY_AUTONOMY_LEVEL] == AutonomyLevel.FAMILY_EASY.name) {
+                it[KEY_AUTONOMY_LEVEL] = AutonomyLevel.BALANCED.name
+            }
+        }
+    }
+
+    suspend fun updateAutonomyLevel(level: AutonomyLevel) {
+        editPrefs {
+            it[KEY_AUTONOMY_LEVEL] = level.name
+            it[KEY_AGENT_MODE] = if (level == AutonomyLevel.FAMILY_EASY) {
+                AgentMode.FAMILY_EASY_MODE.name
+            } else {
+                AgentMode.STANDARD_AGENT.name
+            }
+        }
     }
 
     suspend fun updateAgentToolsEnabled(enabled: Boolean) {
@@ -282,6 +304,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         private val KEY_PRIVACY_ACCEPTED = booleanPreferencesKey("privacy_notice_accepted")
         private val KEY_LAST_SESSION_SUMMARY = stringPreferencesKey("last_session_summary")
         private val KEY_AGENT_MODE = stringPreferencesKey("agent_mode")
+        private val KEY_AUTONOMY_LEVEL = stringPreferencesKey("autonomy_level")
         private val KEY_AGENT_TOOLS_ENABLED = booleanPreferencesKey("agent_tools_enabled")
         private val KEY_MAX_TASK_STEPS = intPreferencesKey("max_task_steps")
         private val KEY_MAX_ACTION_RETRIES = intPreferencesKey("max_action_retries")

@@ -15,6 +15,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,6 +42,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -50,12 +53,14 @@ import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PresentToAll
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.StopScreenShare
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -126,7 +131,7 @@ import java.util.Locale
  * Includes screen sharing status, microphone toggle, AI audio toggle,
  * Stop Screen Sharing, End Conversation, and real-time transcript + text input.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun LiveAssistantScreen(
     selectedModelName: String,
@@ -177,7 +182,12 @@ fun LiveAssistantScreen(
     onDismissError: () -> Unit,
     onNavigateToApiSettings: () -> Unit,
     isTopLevelTab: Boolean = false,
-    onOpenDrawer: (() -> Unit)? = null
+    onOpenDrawer: (() -> Unit)? = null,
+    onRunAutonomousCommand: (String) -> Boolean = {
+        onSendTextMessage(it)
+        true
+    },
+    onLaunchFloatingAgent: () -> Unit = {}
 ) {
     BackHandler(onBack = onBack)
 
@@ -422,25 +432,49 @@ fun LiveAssistantScreen(
                         FilterChip(
                             selected = selectedConsoleTab == 0,
                             onClick = { selectedConsoleTab = 0 },
-                            label = { Text("Transcript") },
+                            label = {
+                                Text(
+                                    text = "Chat",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1
+                                )
+                            },
                             modifier = Modifier.testTag("console_tab_transcript")
                         )
                         FilterChip(
                             selected = selectedConsoleTab == 1,
                             onClick = { selectedConsoleTab = 1 },
-                            label = { Text("Agent (${agentTaskSteps.size})") },
+                            label = {
+                                Text(
+                                    text = "Steps (${agentTaskSteps.size})",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1
+                                )
+                            },
                             modifier = Modifier.testTag("console_tab_agent_activity")
                         )
                         FilterChip(
                             selected = selectedConsoleTab == 2,
                             onClick = { selectedConsoleTab = 2 },
-                            label = { Text("Logs (${agentTaskLogs.size})") },
+                            label = {
+                                Text(
+                                    text = "Logs (${agentTaskLogs.size})",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1
+                                )
+                            },
                             modifier = Modifier.testTag("console_tab_task_logs")
                         )
                         FilterChip(
                             selected = selectedConsoleTab == 3,
                             onClick = { selectedConsoleTab = 3 },
-                            label = { Text("Diagnostics") },
+                            label = {
+                                Text(
+                                    text = "Tools",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1
+                                )
+                            },
                             modifier = Modifier.testTag("console_tab_diagnostics")
                         )
                     }
@@ -582,29 +616,71 @@ fun LiveAssistantScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(24.dp),
+                                    .padding(18.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.GraphicEq,
+                                        imageVector = if (sessionState.isActive) Icons.Default.GraphicEq else Icons.Default.SmartToy,
                                         contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                                        modifier = Modifier.size(40.dp)
+                                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                                        modifier = Modifier.size(38.dp)
                                     )
                                     Text(
                                         text = if (sessionState.isActive) {
-                                            "Live audio & screen session is active.\nSpeak naturally in Bangla or English, or tap Share Screen below."
+                                            "Live voice & screen session is active.\nSpeak naturally in Bangla or English, or tap Share Screen below."
                                         } else {
-                                            "Start a Live Session to share your screen and talk with ScreenSight AI Agent in real time."
+                                            "Dual-Mode Agent Ready.\nType any command below to run immediately on device, or start a Live Voice & Screen session."
                                         },
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         textAlign = TextAlign.Center
                                     )
+                                    if (!sessionState.isActive) {
+                                        FlowRow(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            AssistChip(
+                                                onClick = {
+                                                    val sentLive = onRunAutonomousCommand("Check date and time")
+                                                    if (!sentLive) selectedConsoleTab = 1
+                                                },
+                                                label = { Text("Check time") },
+                                                leadingIcon = {
+                                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                },
+                                                modifier = Modifier.testTag("agent_starter_time")
+                                            )
+                                            AssistChip(
+                                                onClick = {
+                                                    val sentLive = onRunAutonomousCommand("Read current screen")
+                                                    if (!sentLive) selectedConsoleTab = 1
+                                                },
+                                                label = { Text("Scan screen") },
+                                                modifier = Modifier.testTag("agent_starter_screen")
+                                            )
+                                            AssistChip(
+                                                onClick = {
+                                                    val sentLive = onRunAutonomousCommand("Open YouTube")
+                                                    if (!sentLive) selectedConsoleTab = 1
+                                                },
+                                                label = { Text("Open YouTube") },
+                                                modifier = Modifier.testTag("agent_starter_youtube")
+                                            )
+                                            AssistChip(
+                                                onClick = onLaunchFloatingAgent,
+                                                label = { Text("Floating Pill") },
+                                                leadingIcon = {
+                                                    Icon(Icons.Default.PictureInPictureAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                },
+                                                modifier = Modifier.testTag("agent_floating_overlay_button")
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         } else {
@@ -622,12 +698,13 @@ fun LiveAssistantScreen(
                     }
                 }
 
-                // Optional Text Input Row (for multimodal text + screen questions when user prefers typing)
+                // Dual-Mode Input Row: Live chat when active OR immediate on-device autonomous command when idle
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    val canSubmitCommand = messageInput.isNotBlank()
                     OutlinedTextField(
                         value = messageInput,
                         onValueChange = { messageInput = it },
@@ -636,8 +713,11 @@ fun LiveAssistantScreen(
                             .testTag("live_text_input"),
                         placeholder = {
                             Text(
-                                if (isSharingScreen) "Ask about what's on screen..."
-                                else "Type a message or speak aloud..."
+                                when {
+                                    isSharingScreen -> "Ask about what's on screen..."
+                                    sessionState.isActive -> "Type a live message or speak aloud..."
+                                    else -> "Give a command to run autonomously..."
+                                }
                             )
                         },
                         singleLine = true,
@@ -645,17 +725,21 @@ fun LiveAssistantScreen(
                     )
                     IconButton(
                         onClick = {
-                            if (messageInput.isNotBlank()) {
-                                onSendTextMessage(messageInput)
+                            val trimmed = messageInput.trim()
+                            if (trimmed.isNotEmpty()) {
+                                val sentToLiveSession = onRunAutonomousCommand(trimmed)
                                 messageInput = ""
+                                if (!sentToLiveSession) {
+                                    selectedConsoleTab = 1
+                                }
                             }
                         },
-                        enabled = messageInput.isNotBlank() && sessionState.isActive,
+                        enabled = canSubmitCommand,
                         modifier = Modifier
                             .size(48.dp)
                             .clip(RoundedCornerShape(14.dp))
                             .background(
-                                if (messageInput.isNotBlank() && sessionState.isActive) {
+                                if (canSubmitCommand) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
                                     MaterialTheme.colorScheme.surfaceVariant
@@ -665,8 +749,8 @@ fun LiveAssistantScreen(
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Send Message",
-                            tint = if (messageInput.isNotBlank() && sessionState.isActive) {
+                            contentDescription = if (sessionState.isActive) "Send Message" else "Run Command Autonomously",
+                            tint = if (canSubmitCommand) {
                                 MaterialTheme.colorScheme.onPrimary
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
@@ -675,7 +759,7 @@ fun LiveAssistantScreen(
                     }
                 }
 
-                // Bottom Control Dock: Mic toggle, AI audio toggle, Share/Stop Screen, Start/End Session
+                // Bottom Control Dock: Mic toggle, AI audio toggle, Share/Stop Screen, Start/End Session + Floating Pill
                 LiveControlDock(
                     sessionState = sessionState,
                     isSharingScreen = isSharingScreen,
@@ -683,6 +767,7 @@ fun LiveAssistantScreen(
                     isAiMuted = isAiMuted,
                     applyNavigationBarsPadding = !isTopLevelTab,
                     onStartSession = onStartSession,
+                    onLaunchFloatingAgent = onLaunchFloatingAgent,
                     onRequestShareScreen = onRequestShareScreen,
                     onStopShareScreen = onStopShareScreen,
                     onToggleMicMute = onToggleMicMute,
@@ -945,6 +1030,7 @@ private fun LiveControlDock(
     isAiMuted: Boolean,
     applyNavigationBarsPadding: Boolean = true,
     onStartSession: () -> Unit,
+    onLaunchFloatingAgent: () -> Unit = {},
     onRequestShareScreen: () -> Unit,
     onStopShareScreen: () -> Unit,
     onToggleMicMute: () -> Unit,
@@ -967,25 +1053,45 @@ private fun LiveControlDock(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             if (!sessionState.isActive) {
-                Button(
-                    onClick = onStartSession,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp)
-                        .testTag("live_start_session_button"),
-                    shape = RoundedCornerShape(16.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (sessionState == LiveSessionState.STOPPED || sessionState == LiveSessionState.ERROR) {
-                            "Start New Live Session"
-                        } else {
-                            "Start Live Session"
-                        },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Button(
+                        onClick = onStartSession,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp)
+                            .testTag("live_start_session_button"),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (sessionState == LiveSessionState.STOPPED || sessionState == LiveSessionState.ERROR) {
+                                "New Live Session"
+                            } else {
+                                "Launch Voice & Screen"
+                            },
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+                    FilledTonalButton(
+                        onClick = onLaunchFloatingAgent,
+                        modifier = Modifier
+                            .height(52.dp)
+                            .testTag("live_dock_floating_button"),
+                        shape = RoundedCornerShape(16.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PictureInPictureAlt,
+                            contentDescription = "Launch Floating Agent Pill"
+                        )
+                    }
                 }
             } else {
                 // Active session controls: Mic toggle, AI voice toggle, Share/Stop Screen

@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -137,6 +138,7 @@ fun LibraryScreen(
 
     var showAddMemoryDialog by remember { mutableStateOf(false) }
     var editingMemory by remember { mutableStateOf<AgentMemoryRecord?>(null) }
+    var prefillTemplate by remember { mutableStateOf<Triple<MemoryCategory, String, String>?>(null) }
     var showClearAllMemoriesDialog by remember { mutableStateOf(false) }
 
     var showCreateSkillDialog by remember { mutableStateOf(false) }
@@ -162,16 +164,21 @@ fun LibraryScreen(
     if (showAddMemoryDialog || editingMemory != null) {
         LibraryMemoryEditorDialog(
             existing = editingMemory,
+            prefillCategory = prefillTemplate?.first,
+            prefillKey = prefillTemplate?.second,
+            prefillValue = prefillTemplate?.third,
             defaultRetentionPolicy = defaultRetentionPolicy,
             onDismiss = {
                 showAddMemoryDialog = false
                 editingMemory = null
+                prefillTemplate = null
             },
             onConfirm = { cat, k, v, exp ->
                 val target = editingMemory
                 if (target == null) onAddMemory(cat, k, v, exp) else onEditMemory(target.id, cat, k, v, exp)
                 showAddMemoryDialog = false
                 editingMemory = null
+                prefillTemplate = null
             }
         )
     }
@@ -279,8 +286,18 @@ fun LibraryScreen(
                         selectedCategory = selectedCategory,
                         onSelectCategory = { selectedCategory = it },
                         onToggleMemoryEnabled = onToggleMemoryEnabled,
-                        onAddMemoryClick = { showAddMemoryDialog = true },
-                        onEditMemoryClick = { editingMemory = it },
+                        onAddMemoryClick = {
+                            prefillTemplate = null
+                            showAddMemoryDialog = true
+                        },
+                        onUseStarterTemplate = { cat, key, value ->
+                            prefillTemplate = Triple(cat, key, value)
+                            showAddMemoryDialog = true
+                        },
+                        onEditMemoryClick = {
+                            prefillTemplate = null
+                            editingMemory = it
+                        },
                         onDeleteMemoryClick = onDeleteMemory,
                         onClearAllClick = { showClearAllMemoriesDialog = true }
                     )
@@ -314,6 +331,7 @@ fun LibraryScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun LibraryMemoryTab(
     memoryEnabled: Boolean,
@@ -324,6 +342,7 @@ private fun LibraryMemoryTab(
     onSelectCategory: (MemoryCategory?) -> Unit,
     onToggleMemoryEnabled: (Boolean) -> Unit,
     onAddMemoryClick: () -> Unit,
+    onUseStarterTemplate: (MemoryCategory, String, String) -> Unit,
     onEditMemoryClick: (AgentMemoryRecord) -> Unit,
     onDeleteMemoryClick: (String) -> Unit,
     onClearAllClick: () -> Unit
@@ -451,6 +470,71 @@ private fun LibraryMemoryTab(
                         "Try clearing your search or category filter."
                     }
                 )
+            }
+            if (memories.isEmpty() && memoryEnabled) {
+                item(key = "starter_memory_templates") {
+                    FeatureCard {
+                        Text(
+                            text = "Quick Starter Memory Templates",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Tap a template to pre-fill a structured local memory record.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            AssistChip(
+                                onClick = {
+                                    onUseStarterTemplate(
+                                        MemoryCategory.USER_PREFERENCE,
+                                        "preferred_language",
+                                        "Bangla and English (Auto)"
+                                    )
+                                },
+                                label = { Text("Preferred Language") },
+                                modifier = Modifier.testTag("memory_template_language")
+                            )
+                            AssistChip(
+                                onClick = {
+                                    onUseStarterTemplate(
+                                        MemoryCategory.ROUTINE,
+                                        "morning_routine_time",
+                                        "6:30 AM daily wake-up & news check"
+                                    )
+                                },
+                                label = { Text("Morning Routine") },
+                                modifier = Modifier.testTag("memory_template_routine")
+                            )
+                            AssistChip(
+                                onClick = {
+                                    onUseStarterTemplate(
+                                        MemoryCategory.APP_PREFERENCE,
+                                        "favorite_youtube_topics",
+                                        "Tech reviews, Islamic lectures, cricket highlights"
+                                    )
+                                },
+                                label = { Text("YouTube Topics") },
+                                modifier = Modifier.testTag("memory_template_topics")
+                            )
+                            AssistChip(
+                                onClick = {
+                                    onUseStarterTemplate(
+                                        MemoryCategory.CONTACT_ALIAS,
+                                        "family_contact_alias",
+                                        "Amma / Abba trusted call alias"
+                                    )
+                                },
+                                label = { Text("Family Contact Alias") },
+                                modifier = Modifier.testTag("memory_template_family")
+                            )
+                        }
+                    }
+                }
             }
         } else {
             items(filteredMemories, key = { it.id }) { record ->
@@ -759,13 +843,22 @@ private fun SkillWorkflowDetailSheet(
 @Composable
 private fun LibraryMemoryEditorDialog(
     existing: AgentMemoryRecord?,
+    prefillCategory: MemoryCategory? = null,
+    prefillKey: String? = null,
+    prefillValue: String? = null,
     defaultRetentionPolicy: MemoryExpirationPolicy,
     onDismiss: () -> Unit,
     onConfirm: (MemoryCategory, String, String, MemoryExpirationPolicy) -> Unit
 ) {
-    var category by remember(existing) { mutableStateOf(existing?.category ?: MemoryCategory.USER_PREFERENCE) }
-    var key by remember(existing) { mutableStateOf(existing?.memoryKey ?: "") }
-    var value by remember(existing) { mutableStateOf(existing?.value ?: "") }
+    var category by remember(existing, prefillCategory) {
+        mutableStateOf(existing?.category ?: prefillCategory ?: MemoryCategory.USER_PREFERENCE)
+    }
+    var key by remember(existing, prefillKey) {
+        mutableStateOf(existing?.memoryKey ?: prefillKey.orEmpty())
+    }
+    var value by remember(existing, prefillValue) {
+        mutableStateOf(existing?.value ?: prefillValue.orEmpty())
+    }
     var expiry by remember(existing) { mutableStateOf(existing?.expirationPolicy ?: defaultRetentionPolicy) }
 
     AlertDialog(
@@ -790,14 +883,18 @@ private fun LibraryMemoryEditorDialog(
                     onValueChange = { key = it },
                     label = { Text("Memory Key (e.g., preferred_video_app)") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("memory_editor_key_input")
                 )
                 OutlinedTextField(
                     value = value,
                     onValueChange = { value = it },
                     label = { Text("Content (e.g., YouTube)") },
                     maxLines = 3,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("memory_editor_value_input")
                 )
                 Text(text = "Retention", style = MaterialTheme.typography.labelMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

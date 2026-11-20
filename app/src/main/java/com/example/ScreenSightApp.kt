@@ -164,6 +164,7 @@ class AppContainer(context: Context) {
                 banglaVoiceFeedbackManager.setSpeechRate(settings.ttsSpeechRate)
                 banglaVoiceFeedbackManager.setVoiceOutputEnabled(settings.voiceOutputEnabled)
                 audioPlaybackManager.setOutputVolume(settings.voiceOutputVolume)
+                agentCoordinator.updateAutonomyLevel(settings.autonomyLevel)
                 agentCoordinator.updateExecutionConfig(
                     com.example.agent.AgentExecutionConfig(
                         maxStepsPerTask = settings.maxTaskSteps,

@@ -48,6 +48,7 @@ import androidx.navigation.navArgument
 import com.example.agent.AgentMode
 import com.example.data.local.memory.MemoryExpirationPolicy
 import com.example.data.local.orchestration.LongTermTaskStatus
+import com.example.domain.model.AutonomyLevel
 import com.example.domain.model.GeminiLiveModel
 import com.example.domain.model.ThemePreference
 import com.example.ui.ScreenSightViewModel
@@ -503,6 +504,56 @@ fun ScreenSightAppNavHost(
                             viewModel.cancelActiveAgentTask()
                             longTermTasks.firstOrNull { it.status == LongTermTaskStatus.RUNNING }
                                 ?.let { viewModel.cancelLongTermTask(it.taskId) }
+                        },
+                        skills = skills,
+                        proactiveSuggestions = proactiveSuggestions,
+                        feedbackMessage = autonomousFeedbackMessage ?: memoryFeedbackMessage,
+                        onDismissFeedback = {
+                            viewModel.clearAutonomousFeedback()
+                            viewModel.clearMemoryFeedback()
+                        },
+                        onSelectAutonomyLevel = { level ->
+                            viewModel.updateAutonomyLevel(level)
+                            if (level == AutonomyLevel.FAMILY_EASY) {
+                                navController.navigate(ScreenRoutes.ROUTE_FAMILY_EASY_MODE) {
+                                    launchSingleTop = true
+                                }
+                            }
+                        },
+                        onLaunchFloatingAgent = {
+                            if (!viewModel.launchFloatingAgentOverlay()) {
+                                runCatching {
+                                    context.startActivity(viewModel.createOverlaySettingsIntent())
+                                }
+                            }
+                        },
+                        onFixAccessibility = {
+                            runCatching {
+                                context.startActivity(viewModel.createAccessibilitySettingsIntent())
+                            }
+                        },
+                        onFixMicrophone = {
+                            singlePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        },
+                        onFixOverlay = {
+                            runCatching {
+                                context.startActivity(viewModel.createOverlaySettingsIntent())
+                            }
+                        },
+                        onRunSkill = { skillId, params ->
+                            viewModel.runSkill(skillId, params)
+                        },
+                        onRunProactiveSuggestion = { suggestion ->
+                            viewModel.runProactiveSuggestion(suggestion)
+                        },
+                        onDismissProactiveSuggestion = { suggestionId ->
+                            viewModel.dismissProactiveSuggestion(suggestionId)
+                        },
+                        onRunCustomOpenApp = { appName ->
+                            viewModel.runQuickOpenApp(appName)
+                        },
+                        onRunCustomAlarm = { hour24, minute, label ->
+                            viewModel.runQuickSetAlarm(hour24 = hour24, minute = minute, label = label)
                         }
                     )
                 }
@@ -571,7 +622,15 @@ fun ScreenSightAppNavHost(
                             }
                         },
                         isTopLevelTab = true,
-                        onOpenDrawer = { scope.launch { drawerState.open() } }
+                        onOpenDrawer = { scope.launch { drawerState.open() } },
+                        onRunAutonomousCommand = { cmd -> viewModel.submitAgentTabInstruction(cmd) },
+                        onLaunchFloatingAgent = {
+                            if (!viewModel.launchFloatingAgentOverlay()) {
+                                runCatching {
+                                    context.startActivity(viewModel.createOverlaySettingsIntent())
+                                }
+                            }
+                        }
                     )
                 }
 
@@ -700,6 +759,7 @@ fun ScreenSightAppNavHost(
                         onStartOrInspectScreenShare = { navigateToPrimaryTab(ScreenRoutes.ROUTE_LIVE_ASSISTANT) },
                         onStopScreenShare = { viewModel.stopScreenSharing() },
                         onSelectAgentMode = { viewModel.updateAgentMode(it) },
+                        onSelectAutonomyLevel = { viewModel.updateAutonomyLevel(it) },
                         onToggleAgentTools = { viewModel.updateAgentToolsEnabled(it) },
                         onUpdateAgentLimits = { steps, retries, timeout ->
                             viewModel.updateAgentExecutionLimits(steps, retries, timeout)

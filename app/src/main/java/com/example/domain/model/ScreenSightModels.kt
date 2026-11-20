@@ -33,6 +33,28 @@ enum class ThemePreference(val label: String) {
     DARK("Dark Mode")
 }
 
+enum class AutonomyLevel(
+    val shortLabel: String,
+    val title: String,
+    val description: String
+) {
+    ASK_FIRST(
+        shortLabel = "Ask First",
+        title = "Ask Before Acting",
+        description = "Requests confirmation before every device-changing action."
+    ),
+    BALANCED(
+        shortLabel = "Balanced",
+        title = "Balanced Autonomous",
+        description = "Runs safe actions automatically; confirms calls, messages & edits."
+    ),
+    FAMILY_EASY(
+        shortLabel = "Family",
+        title = "Family Easy Mode",
+        description = "Bangla voice-first guidance with maximum confirmation safeguards."
+    )
+}
+
 @Serializable
 data class GeminiLiveModel(
     val id: String,
@@ -201,6 +223,7 @@ data class AppSettings(
     val hasAcceptedPrivacyNotice: Boolean = false,
     val lastSessionSummary: String = "No session recorded yet",
     val agentMode: AgentMode = AgentMode.STANDARD_AGENT,
+    val autonomyLevel: AutonomyLevel = AutonomyLevel.BALANCED,
     val agentToolsEnabled: Boolean = true,
     val maxTaskSteps: Int = 12,
     val maxActionRetries: Int = 2,
