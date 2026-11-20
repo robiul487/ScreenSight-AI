@@ -521,7 +521,7 @@ class ScreenSightViewModel(
             val skCount = runCatching { skillRepository.getAllSkills().size }.getOrDefault(0)
             val ltCount = runCatching { checkpointDatabase.longTermTaskDao().getAllTasks().size }.getOrDefault(0)
             val schCount = runCatching { checkpointDatabase.scheduledTaskDao().getAllSchedules().size }.getOrDefault(0)
-            val metricCount = runCatching { checkpointDatabase.toolMetricDao().getRecent(200).size }.getOrDefault(0)
+            val metricCount = runCatching { checkpointDatabase.toolMetricDao().getRecentMetrics(200).size }.getOrDefault(0)
             _storageSnapshot.value = LocalStorageSnapshot(
                 databaseSizeBytes = dbBytes,
                 cacheSizeBytes = cacheBytes,
@@ -550,7 +550,7 @@ class ScreenSightViewModel(
             var removed = 0
             all.filter { it.status == "COMPLETED" || it.status == "FAILED" || it.status == "CANCELLED" }
                 .forEach {
-                    checkpointDatabase.longTermTaskDao().deleteById(it.taskId)
+                    checkpointDatabase.longTermTaskDao().deleteTask(it.taskId)
                     removed++
                 }
             agentCoordinator.clearTaskHistory()
@@ -565,10 +565,10 @@ class ScreenSightViewModel(
             memoryRepository.clearAllMemories()
             taskScheduler.cancelAllBackgroundWork()
             checkpointDatabase.scheduledTaskDao().getAllSchedules().forEach {
-                checkpointDatabase.scheduledTaskDao().deleteById(it.scheduleId)
+                checkpointDatabase.scheduledTaskDao().deleteSchedule(it.scheduleId)
             }
             checkpointDatabase.longTermTaskDao().getAllTasks().forEach {
-                checkpointDatabase.longTermTaskDao().deleteById(it.taskId)
+                checkpointDatabase.longTermTaskDao().deleteTask(it.taskId)
             }
             agentCoordinator.clearTaskHistory()
             agentCoordinator.taskLogger.clearLogs()

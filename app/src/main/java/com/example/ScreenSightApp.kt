@@ -2,6 +2,8 @@ package com.example
 
 import android.app.Application
 import android.content.Context
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.preferencesDataStoreFile
 import com.example.agent.AgentActionExecutor
 import com.example.agent.AgentCoordinator
 import com.example.agent.AgentPermissionManager
@@ -50,7 +52,11 @@ class AppContainer(context: Context) {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     val apiKeyRepository: ApiKeyStorage = ApiKeyRepository(context)
-    val settingsRepository = SettingsRepository(context)
+    private val settingsDataStore = PreferenceDataStoreFactory.create(
+        scope = appScope,
+        produceFile = { context.applicationContext.preferencesDataStoreFile("screensight_settings") }
+    )
+    val settingsRepository = SettingsRepository(settingsDataStore)
     val webSocketClient = GeminiWebSocketClient()
     val geminiLiveRepository = GeminiLiveRepository(webSocketClient)
     val audioCaptureManager = AudioCaptureManager(context)
@@ -191,6 +197,10 @@ class AppContainer(context: Context) {
     val sendScreenFrameUseCase = SendScreenFrameUseCase(sessionManager)
     val startAudioUseCase = StartAudioUseCase(sessionManager)
     val sendTextMessageUseCase = SendTextMessageUseCase(sessionManager)
+
+    fun shutdown() {
+        appScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+    }
 }
 
 class ScreenSightApp : Application() {
@@ -200,5 +210,12 @@ class ScreenSightApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(applicationContext)
+    }
+
+    override fun onTerminate() {
+        if (::container.isInitialized) {
+            container.shutdown()
+        }
+        super.onTerminate()
     }
 }

@@ -699,8 +699,8 @@ private fun AgentExecutionStageStrip(state: AgentExecutionState) {
     val stages = listOf(
         "Understand" to (state == AgentExecutionState.UNDERSTANDING),
         "Plan" to (state == AgentExecutionState.PLANNING),
-        "Execute" to (state == AgentExecutionState.EXECUTING_ACTION || state == AgentExecutionState.WAITING_CONFIRMATION),
-        "Verify" to (state == AgentExecutionState.VERIFYING || state == AgentExecutionState.OBSERVING_SCREEN),
+        "Execute" to (state == AgentExecutionState.EXECUTING || state == AgentExecutionState.WAITING_FOR_USER || state == AgentExecutionState.WAITING_FOR_ACTION),
+        "Verify" to (state == AgentExecutionState.OBSERVING || state == AgentExecutionState.RECOVERING),
         "Done" to (state == AgentExecutionState.COMPLETED)
     )
     Row(

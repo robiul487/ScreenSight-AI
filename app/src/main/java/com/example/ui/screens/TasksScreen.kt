@@ -158,7 +158,7 @@ fun TasksScreen(
     if (inspectedTask != null) {
         TaskDetailsBottomSheet(
             task = inspectedTask,
-            multiAgentContext = lastMultiAgentContext?.takeIf { it.goal.equals(inspectedTask.goal, ignoreCase = true) },
+            multiAgentContext = lastMultiAgentContext?.takeIf { it.sanitizedGoal.equals(inspectedTask.goal, ignoreCase = true) },
             onDismiss = { inspectedTaskId = null },
             onPause = { onPauseTask(inspectedTask.taskId) },
             onResume = { onResumeTask(inspectedTask.taskId) },
@@ -708,7 +708,8 @@ private fun TaskDetailsBottomSheet(
                         val meta = buildString {
                             append(sub.status.name)
                             if (sub.retryCount > 0) append(" • Retries: ${sub.retryCount}")
-                            if (sub.lastResultSummary.isNotBlank()) append(" • ${sub.lastResultSummary}")
+                            val resultDetail = sub.verifiedResult ?: sub.lastError
+                            if (!resultDetail.isNullOrBlank()) append(" • $resultDetail")
                         }
                         Text(
                             text = meta,
@@ -780,7 +781,7 @@ private fun TasksCreateScheduleDialog(
     var minuteText by remember { mutableStateOf("0") }
     var approved by remember { mutableStateOf(false) }
 
-    val needsApproval = selectedAction == ScheduledActionType.OPEN_APP || selectedAction == ScheduledActionType.RUN_SKILL
+    val needsApproval = selectedAction == ScheduledActionType.OPEN_APP || selectedAction == ScheduledActionType.RUN_APPROVED_SKILL
 
     AlertDialog(
         onDismissRequest = onDismiss,

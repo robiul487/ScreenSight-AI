@@ -333,7 +333,7 @@ fun ScreenSightAppNavHost(
         longTermTasks.count {
             it.status == LongTermTaskStatus.RUNNING ||
                 it.status == LongTermTaskStatus.PAUSED ||
-                it.status == LongTermTaskStatus.WAITING_CONFIRMATION
+                it.status == LongTermTaskStatus.PENDING
         } + if (agentExecutionState.isActive) 1 else 0
     }
 

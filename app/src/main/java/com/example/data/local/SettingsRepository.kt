@@ -2,6 +2,7 @@ package com.example.data.local
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -14,14 +15,22 @@ import com.example.domain.model.AppSettings
 import com.example.domain.model.GeminiLiveModel
 import com.example.domain.model.GeminiVoice
 import com.example.domain.model.ThemePreference
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "screensight_settings")
 
 class SettingsRepository(private val dataStore: DataStore<Preferences>) {
 
     constructor(context: Context) : this(context.applicationContext.dataStore)
+
+    private suspend fun editPrefs(transform: (MutablePreferences) -> Unit) {
+        withContext(Dispatchers.IO) {
+            dataStore.edit { prefs -> transform(prefs) }
+        }
+    }
 
     val settingsFlow: Flow<AppSettings> = dataStore.data.map { prefs ->
         val themeStr = prefs[KEY_THEME] ?: ThemePreference.DARK.name
@@ -97,7 +106,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         val clean = modelId.trim()
         if (clean.isNotEmpty()) {
             val normalized = GeminiLiveModel.normalizeModelId(clean)
-            dataStore.edit { it[KEY_SELECTED_MODEL] = normalized }
+            editPrefs { it[KEY_SELECTED_MODEL] = normalized }
         }
     }
 
@@ -105,26 +114,26 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         val clean = modelId.trim()
         if (clean.isNotEmpty()) {
             val normalized = GeminiLiveModel.normalizeModelId(clean)
-            dataStore.edit { it[KEY_FALLBACK_MODEL] = normalized }
+            editPrefs { it[KEY_FALLBACK_MODEL] = normalized }
         }
     }
 
     suspend fun updateSelectedVoice(voiceName: String) {
-        dataStore.edit { it[KEY_SELECTED_VOICE] = voiceName }
+        editPrefs { it[KEY_SELECTED_VOICE] = voiceName }
     }
 
     suspend fun updatePreferredLanguage(language: String) {
-        dataStore.edit { it[KEY_PREFERRED_LANGUAGE] = language }
+        editPrefs { it[KEY_PREFERRED_LANGUAGE] = language }
     }
 
     suspend fun updateSystemInstruction(instruction: String) {
-        dataStore.edit {
+        editPrefs {
             it[KEY_SYSTEM_INSTRUCTION] = instruction.ifBlank { AppSettings.DEFAULT_SYSTEM_INSTRUCTION }
         }
     }
 
     suspend fun updateFrameCaptureConfig(fps: Int, maxDimPx: Int, jpegQuality: Int) {
-        dataStore.edit {
+        editPrefs {
             it[KEY_FRAME_RATE_FPS] = fps.coerceIn(1, 2)
             it[KEY_MAX_DIMENSION_PX] = maxDimPx.coerceIn(640, 1920)
             it[KEY_JPEG_QUALITY] = jpegQuality.coerceIn(40, 90)
@@ -132,32 +141,32 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
     }
 
     suspend fun updateThemePreference(theme: ThemePreference) {
-        dataStore.edit { it[KEY_THEME] = theme.name }
+        editPrefs { it[KEY_THEME] = theme.name }
     }
 
     suspend fun updateDynamicColor(enabled: Boolean) {
-        dataStore.edit { it[KEY_DYNAMIC_COLOR] = enabled }
+        editPrefs { it[KEY_DYNAMIC_COLOR] = enabled }
     }
 
     suspend fun updateHapticFeedback(enabled: Boolean) {
-        dataStore.edit { it[KEY_HAPTIC_FEEDBACK] = enabled }
+        editPrefs { it[KEY_HAPTIC_FEEDBACK] = enabled }
     }
 
     suspend fun updateSoundEffects(enabled: Boolean) {
-        dataStore.edit { it[KEY_SOUND_EFFECTS] = enabled }
+        editPrefs { it[KEY_SOUND_EFFECTS] = enabled }
     }
 
     suspend fun updateAnimationsEnabled(enabled: Boolean) {
-        dataStore.edit { it[KEY_ANIMATIONS_ENABLED] = enabled }
+        editPrefs { it[KEY_ANIMATIONS_ENABLED] = enabled }
     }
 
     suspend fun updateDefaultLandingScreen(route: String) {
         val safe = if (route in setOf("home", "live_assistant", "tasks", "library")) route else "home"
-        dataStore.edit { it[KEY_DEFAULT_LANDING_SCREEN] = safe }
+        editPrefs { it[KEY_DEFAULT_LANDING_SCREEN] = safe }
     }
 
     suspend fun resetUiPreferences() {
-        dataStore.edit {
+        editPrefs {
             it[KEY_THEME] = ThemePreference.DARK.name
             it[KEY_DYNAMIC_COLOR] = false
             it[KEY_HAPTIC_FEEDBACK] = true
@@ -168,23 +177,23 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
     }
 
     suspend fun setPrivacyNoticeAccepted(accepted: Boolean) {
-        dataStore.edit { it[KEY_PRIVACY_ACCEPTED] = accepted }
+        editPrefs { it[KEY_PRIVACY_ACCEPTED] = accepted }
     }
 
     suspend fun updateLastSessionSummary(summary: String) {
-        dataStore.edit { it[KEY_LAST_SESSION_SUMMARY] = summary }
+        editPrefs { it[KEY_LAST_SESSION_SUMMARY] = summary }
     }
 
     suspend fun updateAgentMode(mode: AgentMode) {
-        dataStore.edit { it[KEY_AGENT_MODE] = mode.name }
+        editPrefs { it[KEY_AGENT_MODE] = mode.name }
     }
 
     suspend fun updateAgentToolsEnabled(enabled: Boolean) {
-        dataStore.edit { it[KEY_AGENT_TOOLS_ENABLED] = enabled }
+        editPrefs { it[KEY_AGENT_TOOLS_ENABLED] = enabled }
     }
 
     suspend fun updateAgentExecutionLimits(maxSteps: Int, maxRetries: Int, timeoutSec: Int) {
-        dataStore.edit {
+        editPrefs {
             it[KEY_MAX_TASK_STEPS] = maxSteps.coerceIn(4, 30)
             it[KEY_MAX_ACTION_RETRIES] = maxRetries.coerceIn(0, 5)
             it[KEY_AGENT_TOOL_TIMEOUT_SEC] = timeoutSec.coerceIn(5, 30)
@@ -192,11 +201,11 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
     }
 
     suspend fun updateAutoCheckpointRecovery(enabled: Boolean) {
-        dataStore.edit { it[KEY_AUTO_CHECKPOINT_RECOVERY] = enabled }
+        editPrefs { it[KEY_AUTO_CHECKPOINT_RECOVERY] = enabled }
     }
 
     suspend fun updateBackgroundAutomationEnabled(enabled: Boolean) {
-        dataStore.edit { it[KEY_BACKGROUND_AUTOMATION] = enabled }
+        editPrefs { it[KEY_BACKGROUND_AUTOMATION] = enabled }
     }
 
     suspend fun updateVoiceAudioPreferences(
@@ -206,7 +215,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         voiceOutputVolume: Float? = null,
         bargeInInterruptEnabled: Boolean? = null
     ) {
-        dataStore.edit { prefs ->
+        editPrefs { prefs ->
             voiceInputEnabled?.let { prefs[KEY_VOICE_INPUT_ENABLED] = it }
             voiceOutputEnabled?.let { prefs[KEY_VOICE_OUTPUT_ENABLED] = it }
             ttsSpeechRate?.let { prefs[KEY_TTS_SPEECH_RATE] = it.coerceIn(0.6f, 1.5f) }
@@ -216,27 +225,27 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
     }
 
     suspend fun updateLastAgentTaskSummary(summary: String) {
-        dataStore.edit { it[KEY_LAST_AGENT_TASK_SUMMARY] = summary }
+        editPrefs { it[KEY_LAST_AGENT_TASK_SUMMARY] = summary }
     }
 
     suspend fun updateMemoryEnabled(enabled: Boolean) {
-        dataStore.edit { it[KEY_MEMORY_ENABLED] = enabled }
+        editPrefs { it[KEY_MEMORY_ENABLED] = enabled }
     }
 
     suspend fun updateDefaultMemoryRetention(policyName: String) {
-        dataStore.edit { it[KEY_DEFAULT_MEMORY_RETENTION] = policyName }
+        editPrefs { it[KEY_DEFAULT_MEMORY_RETENTION] = policyName }
     }
 
     suspend fun updateAutoMemoryProposals(enabled: Boolean) {
-        dataStore.edit { it[KEY_AUTO_MEMORY_PROPOSALS] = enabled }
+        editPrefs { it[KEY_AUTO_MEMORY_PROPOSALS] = enabled }
     }
 
     suspend fun updateAutoSkillProposals(enabled: Boolean) {
-        dataStore.edit { it[KEY_AUTO_SKILL_PROPOSALS] = enabled }
+        editPrefs { it[KEY_AUTO_SKILL_PROPOSALS] = enabled }
     }
 
     suspend fun updateProactiveSuggestionsEnabled(enabled: Boolean) {
-        dataStore.edit { it[KEY_PROACTIVE_SUGGESTIONS_ENABLED] = enabled }
+        editPrefs { it[KEY_PROACTIVE_SUGGESTIONS_ENABLED] = enabled }
     }
 
     suspend fun updateNotificationPreferences(
@@ -246,7 +255,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         scheduledNotifications: Boolean? = null,
         vibration: Boolean? = null
     ) {
-        dataStore.edit { prefs ->
+        editPrefs { prefs ->
             taskNotifications?.let { prefs[KEY_TASK_NOTIFICATIONS] = it }
             completionNotifications?.let { prefs[KEY_COMPLETION_NOTIFICATIONS] = it }
             failureNotifications?.let { prefs[KEY_FAILURE_NOTIFICATIONS] = it }

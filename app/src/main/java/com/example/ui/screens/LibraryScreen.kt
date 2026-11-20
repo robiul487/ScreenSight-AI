@@ -534,7 +534,8 @@ private fun LibrarySkillsTab(
                         FilterChip(
                             selected = selectedFilter == filter,
                             onClick = { onSelectFilter(filter) },
-                            label = { Text(filter.label) }
+                            label = { Text(filter.label) },
+                            modifier = Modifier.testTag("skill_filter_${filter.name.lowercase()}")
                         )
                     }
                 }
@@ -719,7 +720,7 @@ private fun SkillWorkflowDetailSheet(
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.Medium
                 )
-                if (step.recoveryToolName.isNotBlank()) {
+                if (!step.recoveryToolName.isNullOrBlank()) {
                     Text(
                         text = "   Recovery fallback: ${step.recoveryToolName}",
                         style = MaterialTheme.typography.labelSmall,

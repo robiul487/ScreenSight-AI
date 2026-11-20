@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
@@ -48,7 +49,6 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Vibration
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -306,7 +306,7 @@ fun SettingsCategoryScreen(
                                         FilterChip(
                                             selected = settings.themePreference == pref,
                                             onClick = { onSelectTheme(pref) },
-                                            label = { Text(pref.displayName) },
+                                            label = { Text(pref.label) },
                                             modifier = Modifier.testTag("settings_theme_${pref.name.lowercase()}")
                                         )
                                     }
@@ -380,7 +380,7 @@ fun SettingsCategoryScreen(
                                 switchTestTag = "settings_haptics_switch"
                             )
                             SettingsToggleItem(
-                                icon = Icons.Default.VolumeUp,
+                                icon = Icons.AutoMirrored.Filled.VolumeUp,
                                 title = "Sound Effects",
                                 subtitle = "Play gentle state cues when sessions start or complete",
                                 checked = settings.soundEffectsEnabled,
@@ -419,7 +419,7 @@ fun SettingsCategoryScreen(
                                 switchTestTag = "settings_voice_input_switch"
                             )
                             SettingsToggleItem(
-                                icon = Icons.Default.VolumeUp,
+                                icon = Icons.AutoMirrored.Filled.VolumeUp,
                                 title = "Voice Output (Spoken Responses)",
                                 subtitle = "Play Gemini Live audio and on-device Bangla/English voice feedback",
                                 checked = settings.voiceOutputEnabled,
@@ -448,9 +448,9 @@ fun SettingsCategoryScreen(
                                 ) {
                                     GeminiVoice.entries.forEach { voice ->
                                         FilterChip(
-                                            selected = settings.selectedVoiceName.equals(voice.apiName, ignoreCase = true),
-                                            onClick = { onSelectVoice(voice.apiName) },
-                                            label = { Text("${voice.apiName} (${voice.tone})") }
+                                            selected = settings.selectedVoiceName.equals(voice.voiceName, ignoreCase = true),
+                                            onClick = { onSelectVoice(voice.voiceName) },
+                                            label = { Text(voice.voiceName) }
                                         )
                                     }
                                 }
@@ -514,7 +514,7 @@ fun SettingsCategoryScreen(
                                     Text("Live Screen Sharing", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                                     Text(
                                         text = if (isSharingScreen) {
-                                            "Streaming ${settings.frameCaptureFps} FPS frames to Gemini Live with active notification."
+                                            "Streaming ${settings.frameRateFps} FPS frames to Gemini Live with active notification."
                                         } else {
                                             "Inactive. Android requires explicit MediaProjection consent each session."
                                         },
@@ -553,8 +553,8 @@ fun SettingsCategoryScreen(
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     listOf(1, 2).forEach { fps ->
                                         FilterChip(
-                                            selected = settings.frameCaptureFps == fps,
-                                            onClick = { onUpdateFrameConfig(fps, settings.frameMaxDimensionPx, settings.frameJpegQuality) },
+                                            selected = settings.frameRateFps == fps,
+                                            onClick = { onUpdateFrameConfig(fps, settings.maxFrameDimensionPx, settings.jpegQuality) },
                                             label = { Text("$fps FPS") }
                                         )
                                     }
@@ -564,8 +564,8 @@ fun SettingsCategoryScreen(
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     listOf(720, 1024, 1280).forEach { dim ->
                                         FilterChip(
-                                            selected = settings.frameMaxDimensionPx == dim,
-                                            onClick = { onUpdateFrameConfig(settings.frameCaptureFps, dim, settings.frameJpegQuality) },
+                                            selected = settings.maxFrameDimensionPx == dim,
+                                            onClick = { onUpdateFrameConfig(settings.frameRateFps, dim, settings.jpegQuality) },
                                             label = { Text("${dim}px") }
                                         )
                                     }
@@ -576,12 +576,12 @@ fun SettingsCategoryScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text("JPEG Quality", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                                    Text("${settings.frameJpegQuality}%", color = MaterialTheme.colorScheme.primary)
+                                    Text("${settings.jpegQuality}%", color = MaterialTheme.colorScheme.primary)
                                 }
                                 Slider(
-                                    value = settings.frameJpegQuality.toFloat(),
+                                    value = settings.jpegQuality.toFloat(),
                                     onValueChange = {
-                                        onUpdateFrameConfig(settings.frameCaptureFps, settings.frameMaxDimensionPx, it.roundToInt())
+                                        onUpdateFrameConfig(settings.frameRateFps, settings.maxFrameDimensionPx, it.roundToInt())
                                     },
                                     valueRange = 50f..90f,
                                     steps = 7
@@ -614,7 +614,7 @@ fun SettingsCategoryScreen(
                                         FilterChip(
                                             selected = settings.agentMode == mode,
                                             onClick = { onSelectAgentMode(mode) },
-                                            label = { Text(mode.displayNameEn) },
+                                            label = { Text(mode.labelEn) },
                                             modifier = Modifier.testTag("settings_mode_${mode.name.lowercase()}")
                                         )
                                     }
@@ -998,10 +998,10 @@ fun SettingsCategoryScreen(
 
                         val securityLogs = remember(agentTaskLogs) {
                             agentTaskLogs.filter {
-                                it.level == AgentTaskLogger.LogLevel.WARNING ||
-                                    it.level == AgentTaskLogger.LogLevel.ERROR ||
-                                    it.category.contains("SAFETY", ignoreCase = true) ||
+                                it.type == AgentTaskLogger.LogEventType.ERROR ||
+                                    it.type == AgentTaskLogger.LogEventType.CONFIRMATION ||
                                     it.message.contains("block", ignoreCase = true) ||
+                                    it.message.contains("safety", ignoreCase = true) ||
                                     it.message.contains("confirm", ignoreCase = true)
                             }.takeLast(8).reversed()
                         }
@@ -1016,7 +1016,7 @@ fun SettingsCategoryScreen(
                             } else {
                                 securityLogs.forEach { entry ->
                                     Text(
-                                        text = "[${entry.category}] ${entry.message}",
+                                        text = "[${entry.type.name}] ${entry.message}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )

@@ -131,8 +131,8 @@ fun SettingsHubScreen(
                     SettingsItem(
                         icon = Icons.Default.Tune,
                         title = "General",
-                        subtitle = "${settings.themePreference.displayName} theme • ${settings.preferredLanguage.substringBefore(" ")}",
-                        badgeText = settings.themePreference.displayName,
+                        subtitle = "${settings.themePreference.label} • ${settings.preferredLanguage.substringBefore(" ")}",
+                        badgeText = settings.themePreference.label.substringBefore(" "),
                         badgeTone = StatusTone.INFO,
                         onClick = { onOpenCategory(SettingsCategory.GENERAL) },
                         modifier = Modifier.testTag("settings_cat_general")
@@ -149,7 +149,7 @@ fun SettingsHubScreen(
                     SettingsItem(
                         icon = Icons.Default.PresentToAll,
                         title = "Screen Awareness",
-                        subtitle = "${settings.frameCaptureFps} FPS • ${settings.frameMaxDimensionPx}px • Sensitive screens protected",
+                        subtitle = "${settings.frameRateFps} FPS • ${settings.maxFrameDimensionPx}px • Sensitive screens protected",
                         badgeText = if (isSharingScreen) "Live" else "Ready",
                         badgeTone = if (isSharingScreen) StatusTone.POSITIVE else StatusTone.NEUTRAL,
                         onClick = { onOpenCategory(SettingsCategory.SCREEN_AWARENESS) },
@@ -184,7 +184,7 @@ fun SettingsHubScreen(
                     SettingsItem(
                         icon = Icons.Default.SmartToy,
                         title = "Agent Behavior",
-                        subtitle = "${settings.agentMode.displayNameEn} • Max ${settings.maxTaskSteps} steps • ${settings.maxActionRetries} retries",
+                        subtitle = "${settings.agentMode.labelEn} • Max ${settings.maxTaskSteps} steps • ${settings.maxActionRetries} retries",
                         badgeText = if (settings.agentToolsEnabled) "Tools On" else "Chat Only",
                         badgeTone = if (settings.agentToolsEnabled) StatusTone.INFO else StatusTone.NEUTRAL,
                         onClick = { onOpenCategory(SettingsCategory.AGENT_BEHAVIOR) },
