@@ -52,4 +52,11 @@
     <string name="tasks_screen_title">Tasks</string>
     <string name="library_screen_title">Library</string>
     <string name="settings_hub_title">Settings</string>
+
+    <!-- Native Android Assistant Integration (Neya & Hey Neya) -->
+    <string name="neya_assistant_service_label">Neya (ScreenSight AI)</string>
+    <string name="neya_recognition_service_label">Neya Voice Input</string>
+    <string name="neya_assistant_section_title">Neya Native Assistant &amp; Hey Neya</string>
+    <string name="neya_set_default_assistant">Set Neya as Default Assistant</string>
+    <string name="neya_invoke_now">Invoke Neya Now</string>
 </resources>

@@ -1,18 +1,19 @@
 package com.example.agent
 
+import com.example.data.ai.ModelUsageRecord
 import com.example.data.local.memory.AgentMemoryRecord
 import com.example.data.local.orchestration.TaskSubtask
 import com.example.data.local.skill.AgentSkill
 import java.util.UUID
 
 /**
- * Phase 5: Controlled Multi-Agent Architecture.
+ * Phase 5+: Controlled Multi-Agent Architecture with Optional Gemma 4 Reasoning.
  *
- * Implements strictly bounded logical roles sharing a single [SharedAgentTaskContext]
- * on top of the existing single configured API model (no unnecessary parallel API calls):
- * - [AgentRole.MEMORY]: Retrieves relevant sanitized local memories (read-only).
- * - [AgentRole.PLANNER]: Selects safe tools / matching skills and produces structured subtasks (no direct execution).
- * - [AgentRole.RESEARCH]: Performs read-only screen/web information analysis (no state modification).
+ * Implements strictly bounded logical roles sharing a single [SharedAgentTaskContext]:
+ * - [AgentRole.MEMORY]: Retrieves relevant sanitized local memories (read-only), optionally ranked via Gemma.
+ * - [AgentRole.PLANNER]: Selects safe tools / matching skills and produces structured subtasks via Gemma 4
+ *   (or deterministic local fallback when offline/trivial). No direct execution.
+ * - [AgentRole.RESEARCH]: Performs read-only context analysis (no state modification).
  * - [AgentRole.EXECUTOR]: The ONLY role permitted to dispatch device tools, ALWAYS routed through
  *   [AgentToolRegistry] + [AgentSafetyManager].
  * - [AgentRole.VERIFIER]: Independently checks post-execution outcome before task completion.
@@ -26,6 +27,7 @@ class MultiAgentOrchestrator(
     private val dynamicToolManager: DynamicToolManager,
     private val memoryRetriever: IntelligentMemoryRetriever? = null,
     private val skillLearningEngine: SkillLearningEngine = SkillLearningEngine(dynamicToolManager.toolRegistry),
+    private val gemmaReasoningEngine: GemmaAgentReasoningEngine? = null,
     private val toolExecutor: suspend (AgentActionRequest, Boolean) -> AgentActionResult = { req, confirmed ->
         val tool = dynamicToolManager.toolRegistry.getTool(req.actionType.toolName)
         if (tool != null) {
@@ -75,7 +77,9 @@ class MultiAgentOrchestrator(
         val executionResults: List<AgentActionResult> = emptyList(),
         val verifiedComplete: Boolean = false,
         val verificationNote: String = "",
-        val auditTrail: List<RoleAuditEntry> = emptyList()
+        val auditTrail: List<RoleAuditEntry> = emptyList(),
+        val modelUsage: ModelUsageRecord? = null,
+        val directAnswer: String? = null
     )
 
     sealed class RoleToolDispatchResult {
@@ -170,19 +174,57 @@ class MultiAgentOrchestrator(
         )
 
         // 2. PLANNER role: discover tools, check reusable approved skills, build dependency-ordered subtasks
+        //    Uses Gemma 4 reasoning for complex goals when available, with automatic deterministic fallback.
         val selectedTools = dynamicToolManager.selectToolsForTask(cleanGoal, maxTools = 6)
         val matchedSkill = skillLearningEngine.findRelevantSkillForGoal(cleanGoal, availableSkills)
-        val plannedSubtasks = buildSubtasksFromGoal(cleanGoal, matchedSkill, selectedTools)
+        var usedModelRecord: ModelUsageRecord? = null
+        var directReasoningAnswer: String? = null
+        var plannerNote: String
+
+        val plannedSubtasks = if (matchedSkill != null && matchedSkill.executionSteps.isNotEmpty()) {
+            val fromSkill = buildSubtasksFromGoal(cleanGoal, matchedSkill, selectedTools)
+            plannerNote = "Reused approved skill '${matchedSkill.name}' (${fromSkill.size} subtasks)"
+            fromSkill
+        } else if (gemmaReasoningEngine != null) {
+            val gemmaPlan = gemmaReasoningEngine.planGoalWithReasoning(
+                goal = cleanGoal,
+                retrievedMemories = memories,
+                availableSkills = availableSkills,
+                taskIdForTelemetry = taskId
+            )
+            usedModelRecord = gemmaPlan.modelUsage
+            directReasoningAnswer = gemmaPlan.directAnswer
+            when {
+                gemmaPlan.usedCloudModel && gemmaPlan.subtasks.isNotEmpty() -> {
+                    plannerNote = "${gemmaPlan.modelUsage?.modelDisplayName ?: "Gemma"} planned ${gemmaPlan.subtasks.size} validated subtask(s)" +
+                        if (gemmaPlan.rejectedToolProposalsCount > 0 || gemmaPlan.blockedBySafetyCount > 0) {
+                            " (${gemmaPlan.rejectedToolProposalsCount} rejected, ${gemmaPlan.blockedBySafetyCount} blocked by safety)"
+                        } else {
+                            ""
+                        }
+                    gemmaPlan.subtasks
+                }
+                gemmaPlan.usedCloudModel && !gemmaPlan.directAnswer.isNullOrBlank() -> {
+                    plannerNote = "${gemmaPlan.modelUsage?.modelDisplayName ?: "Gemma"} produced direct text answer (no device tools needed)"
+                    emptyList()
+                }
+                else -> {
+                    val localSubtasks = buildSubtasksFromGoal(cleanGoal, null, selectedTools)
+                    plannerNote = "Local planner (${gemmaPlan.fallbackReason ?: "fast-path"}): ${localSubtasks.size} subtask(s)"
+                    localSubtasks
+                }
+            }
+        } else {
+            val localSubtasks = buildSubtasksFromGoal(cleanGoal, null, selectedTools)
+            plannerNote = "Selected ${selectedTools.size} tools -> planned ${localSubtasks.size} subtasks"
+            localSubtasks
+        }
         audit.add(
             RoleAuditEntry(
                 role = AgentRole.PLANNER,
                 action = "build_subtask_plan",
                 permitted = true,
-                note = if (matchedSkill != null) {
-                    "Reused approved skill '${matchedSkill.name}' (${plannedSubtasks.size} subtasks)"
-                } else {
-                    "Selected ${selectedTools.size} tools -> planned ${plannedSubtasks.size} subtasks"
-                }
+                note = plannerNote
             )
         )
 
@@ -318,7 +360,9 @@ class MultiAgentOrchestrator(
             executionResults = results,
             verifiedComplete = verified,
             verificationNote = verifyNote,
-            auditTrail = audit
+            auditTrail = audit,
+            modelUsage = usedModelRecord,
+            directAnswer = directReasoningAnswer
         )
     }
 

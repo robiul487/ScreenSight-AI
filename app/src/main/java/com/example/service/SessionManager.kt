@@ -737,6 +737,47 @@ class SessionManager(
         }
     }
 
+    /**
+     * Appends a non-live text reasoning exchange (e.g., answered by Gemma 4 while Gemini Live is idle)
+     * into the unified Agent transcript without opening a Live WebSocket session.
+     */
+    fun appendReasoningTranscriptExchange(
+        userText: String,
+        assistantReply: String,
+        modelBadge: String
+    ) {
+        val cleanUser = userText.trim()
+        val cleanReply = assistantReply.trim()
+        if (cleanUser.isEmpty() && cleanReply.isEmpty()) return
+        _transcript.update { current ->
+            val additions = buildList {
+                if (cleanUser.isNotEmpty()) {
+                    add(
+                        TranscriptMessage(
+                            id = UUID.randomUUID().toString(),
+                            sender = MessageSender.USER,
+                            text = cleanUser,
+                            isStreaming = false,
+                            hasScreenContext = false
+                        )
+                    )
+                }
+                if (cleanReply.isNotEmpty()) {
+                    add(
+                        TranscriptMessage(
+                            id = UUID.randomUUID().toString(),
+                            sender = MessageSender.GEMINI,
+                            text = "[$modelBadge] $cleanReply",
+                            isStreaming = false,
+                            hasScreenContext = false
+                        )
+                    )
+                }
+            }
+            (current + additions).takeLast(MAX_TRANSCRIPT_MESSAGES)
+        }
+    }
+
     private fun appendOrUpdateStreamingTranscript(sender: MessageSender, deltaText: String) {
         _transcript.update { current ->
             val last = current.lastOrNull()

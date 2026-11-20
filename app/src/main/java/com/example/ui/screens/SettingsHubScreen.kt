@@ -115,7 +115,8 @@ fun SettingsHubScreen(
     onOpenDrawer: () -> Unit,
     onOpenCategory: (SettingsCategory) -> Unit,
     onOpenApiSettings: () -> Unit,
-    onOpenPermissions: () -> Unit
+    onOpenPermissions: () -> Unit,
+    neyaAssistantState: com.example.assistant.NeyaAssistantRuntimeState = com.example.assistant.NeyaAssistantRuntimeState()
 ) {
     val activeModel = GeminiLiveModel.findByIdOrCustom(settings.selectedModelId)
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -137,9 +138,9 @@ fun SettingsHubScreen(
             groupIndex = 0,
             icon = Icons.Default.GraphicEq,
             title = "Voice & Audio",
-            subtitle = "Voice ${settings.selectedVoiceName} • Speed ${"%.1fx".format(settings.ttsSpeechRate)}",
-            keywords = "voice audio microphone mic tts speech speed volume barge-in interrupt aoede puck charon kore fenrir",
-            badgeText = if (settings.voiceInputEnabled && settings.voiceOutputEnabled) "On" else "Custom",
+            subtitle = "Voice ${settings.selectedVoiceName} • Neya Role: ${if (neyaAssistantState.roleStatus.isActive) "Active" else "Not Set"} • Speed ${"%.1fx".format(settings.ttsSpeechRate)}",
+            keywords = "voice audio microphone mic tts speech speed volume barge-in interrupt aoede puck charon kore fenrir neya default assistant role hey neya wake word hotword dsp voice interaction",
+            badgeText = if (neyaAssistantState.roleStatus.isActive) "Neya On" else if (settings.voiceInputEnabled && settings.voiceOutputEnabled) "On" else "Custom",
             badgeTone = StatusTone.POSITIVE,
             testTag = "settings_cat_voice_audio",
             onClick = { onOpenCategory(SettingsCategory.VOICE_AUDIO) }

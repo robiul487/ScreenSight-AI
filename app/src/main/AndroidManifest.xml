@@ -63,6 +63,10 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
 
         <service
@@ -101,6 +105,38 @@
             android:name=".service.BackgroundTaskActionReceiver"
             android:enabled="true"
             android:exported="false" />
+
+        <!-- Native Android Digital Assistant (VoiceInteractionService + Session + Recognition) -->
+        <service
+            android:name=".assistant.NeyaVoiceInteractionService"
+            android:enabled="true"
+            android:exported="true"
+            android:label="@string/neya_assistant_service_label"
+            android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <meta-data
+                android:name="android.voice_interaction"
+                android:resource="@xml/neya_voice_interaction_service" />
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".assistant.NeyaVoiceInteractionSessionService"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION" />
+
+        <service
+            android:name=".assistant.NeyaRecognitionService"
+            android:enabled="true"
+            android:exported="true"
+            android:label="@string/neya_recognition_service_label">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

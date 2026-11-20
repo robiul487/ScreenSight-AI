@@ -34,6 +34,17 @@ import com.example.agent.ScreenUiSnapshot
 import com.example.agent.SelfReflectionEngine
 import com.example.agent.TrustedContact
 import com.example.agent.TrustedContactsRepository
+import com.example.assistant.AssistantInvocationSource
+import com.example.assistant.NeyaAssistantController
+import com.example.assistant.NeyaAssistantRuntimeState
+import com.example.assistant.WakeDetectionMode
+import com.example.data.ai.AIModelRouter
+import com.example.data.ai.AIProviderId
+import com.example.data.ai.ActiveModelIndicator
+import com.example.data.ai.ModelAvailabilityReport
+import com.example.data.ai.ModelUsageRecord
+import com.example.data.ai.ReasoningRoutingMode
+import com.example.data.ai.VerifiedReasoningModels
 import com.example.data.local.ApiKeyRepository
 import com.example.data.local.ApiKeySource
 import com.example.data.local.ApiKeyStorage
@@ -81,8 +92,20 @@ import java.util.Calendar
 sealed class ApiValidationUiState {
     object Idle : ApiValidationUiState()
     object Validating : ApiValidationUiState()
-    data class Valid(val message: String, val discoveredModels: List<String>) : ApiValidationUiState()
+    data class Valid(
+        val message: String,
+        val discoveredModels: List<String>,
+        val discoveredGemmaModels: List<String> = emptyList(),
+        val discoveredReasoningModels: List<String> = emptyList()
+    ) : ApiValidationUiState()
     data class Invalid(val error: ScreenSightError) : ApiValidationUiState()
+}
+
+sealed class ReasoningModelTestUiState {
+    object Idle : ReasoningModelTestUiState()
+    object Testing : ReasoningModelTestUiState()
+    data class Available(val report: ModelAvailabilityReport) : ReasoningModelTestUiState()
+    data class Unavailable(val report: ModelAvailabilityReport) : ReasoningModelTestUiState()
 }
 
 data class LocalStorageSnapshot(
@@ -118,7 +141,9 @@ class ScreenSightViewModel(
     private val selfReflectionEngine: SelfReflectionEngine,
     private val proactiveAssistantEngine: ProactiveAssistantEngine,
     private val multiAgentOrchestrator: MultiAgentOrchestrator,
-    val safeWebAutomationManager: SafeWebAutomationManager
+    val safeWebAutomationManager: SafeWebAutomationManager,
+    private val aiModelRouter: AIModelRouter? = null,
+    private val neyaAssistantController: NeyaAssistantController? = null
 ) : ViewModel() {
 
     val settings: StateFlow<AppSettings> = settingsRepository.settingsFlow.stateIn(
@@ -243,6 +268,45 @@ class ScreenSightViewModel(
     private val _apiValidationState = MutableStateFlow<ApiValidationUiState>(ApiValidationUiState.Idle)
     val apiValidationState: StateFlow<ApiValidationUiState> = _apiValidationState.asStateFlow()
 
+    private val _reasoningModelTestState = MutableStateFlow<ReasoningModelTestUiState>(ReasoningModelTestUiState.Idle)
+    val reasoningModelTestState: StateFlow<ReasoningModelTestUiState> = _reasoningModelTestState.asStateFlow()
+
+    val taskModelUsageMap: StateFlow<Map<String, ModelUsageRecord>> =
+        aiModelRouter?.taskModelUsageMap ?: MutableStateFlow<Map<String, ModelUsageRecord>>(emptyMap()).asStateFlow()
+
+    val activeModelIndicator: StateFlow<ActiveModelIndicator> = combine(
+        sessionState,
+        settings,
+        aiModelRouter?.activeModelIndicator ?: MutableStateFlow(ActiveModelIndicator())
+    ) { liveState, curSettings, routerIndicator ->
+        if (liveState.isActive) {
+            val liveModel = GeminiLiveModel.findByIdOrCustom(curSettings.selectedModelId)
+            ActiveModelIndicator(
+                activeLabel = liveModel.displayName,
+                modeBadge = AIProviderId.GOOGLE_GEMINI_LIVE.badgeLabel,
+                providerId = AIProviderId.GOOGLE_GEMINI_LIVE,
+                modelId = liveModel.fullResourceName,
+                isUsingFallback = false,
+                lastUsage = routerIndicator.lastUsage
+            )
+        } else if (!curSettings.gemmaReasoningEnabled || curSettings.reasoningRoutingMode == ReasoningRoutingMode.LOCAL_ONLY) {
+            ActiveModelIndicator(
+                activeLabel = "Local Engine",
+                modeBadge = AIProviderId.LOCAL_FAST_PATH.badgeLabel,
+                providerId = AIProviderId.LOCAL_FAST_PATH,
+                modelId = "local",
+                isUsingFallback = false,
+                lastUsage = routerIndicator.lastUsage
+            )
+        } else {
+            routerIndicator
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = ActiveModelIndicator()
+    )
+
     private val _showFirstSessionPrivacyDialog = MutableStateFlow(false)
     val showFirstSessionPrivacyDialog: StateFlow<Boolean> = _showFirstSessionPrivacyDialog.asStateFlow()
 
@@ -252,6 +316,9 @@ class ScreenSightViewModel(
     private val _settingsFeedbackMessage = MutableStateFlow<String?>(null)
     val settingsFeedbackMessage: StateFlow<String?> = _settingsFeedbackMessage.asStateFlow()
 
+    val neyaAssistantState: StateFlow<NeyaAssistantRuntimeState> =
+        neyaAssistantController?.state ?: MutableStateFlow(NeyaAssistantRuntimeState()).asStateFlow()
+
     init {
         refreshPermissions()
         refreshDynamicToolsAndMetrics()
@@ -260,6 +327,56 @@ class ScreenSightViewModel(
 
     fun refreshPermissions() {
         agentPermissionManager.refresh(isScreenSharingActive = sessionManager.isSharingScreen.value)
+        neyaAssistantController?.refreshSystemStatus(wasCancelledByUser = false)
+    }
+
+    fun refreshNeyaAssistantStatus(wasCancelledByUser: Boolean = false) {
+        val state = neyaAssistantController?.refreshSystemStatus(wasCancelledByUser = wasCancelledByUser)
+        if (wasCancelledByUser && state != null && !state.roleStatus.isActive) {
+            _settingsFeedbackMessage.value = "Default assistant selection was cancelled."
+        }
+    }
+
+    fun createDefaultAssistantRequestIntent(): Intent {
+        return neyaAssistantController?.createDefaultAssistantRequestIntent()
+            ?: Intent(Settings.ACTION_VOICE_INPUT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
+    fun updateHeyNeyaEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.updateHeyNeyaEnabled(enabled)
+            neyaAssistantController?.refreshSystemStatus(wasCancelledByUser = false)
+            _settingsFeedbackMessage.value = if (enabled) {
+                "Hey Neya preference saved. Active trigger stays Manual (hardware DSP & offline wake model unavailable)."
+            } else {
+                "Hey Neya preference turned off."
+            }
+        }
+    }
+
+    fun updateWakeDetectionMode(mode: WakeDetectionMode) {
+        viewModelScope.launch {
+            if (mode != WakeDetectionMode.MANUAL_ONLY) {
+                _settingsFeedbackMessage.value =
+                    "${mode.shortLabel} is not available on this third-party install; staying on Manual System Assistant."
+                settingsRepository.updateWakeDetectionMode(WakeDetectionMode.MANUAL_ONLY)
+                return@launch
+            }
+            settingsRepository.updateWakeDetectionMode(mode)
+            _settingsFeedbackMessage.value = "Wake detection set to ${mode.label}."
+        }
+    }
+
+    fun onAssistIntentReceived(source: AssistantInvocationSource = AssistantInvocationSource.ASSIST_INTENT) {
+        neyaAssistantController?.onAssistantSessionShown(source)
+    }
+
+    fun invokeNeyaAssistantManually() {
+        neyaAssistantController?.onAssistantSessionShown(AssistantInvocationSource.MANUAL_IN_APP)
+    }
+
+    fun stopWakeListeningIfActive() {
+        neyaAssistantController?.stopWakeListeningIfActive()
     }
 
     fun createAccessibilitySettingsIntent(): Intent = agentPermissionManager.createAccessibilitySettingsIntent()
@@ -309,16 +426,23 @@ class ScreenSightViewModel(
                     apiKeyRepository.saveApiKey(keyToTest)
                 }
                 val modelNormalized = GeminiLiveModel.findByIdOrCustom(currentModelId).fullResourceName
+                val gemmaSummary = if (result.discoveredGemmaModels.isNotEmpty()) {
+                    " Discovered ${result.discoveredGemmaModels.size} Gemma reasoning model(s) on this same key."
+                } else {
+                    ""
+                }
                 val modelNotice = if (result.discoveredLiveModels.isNotEmpty() &&
                     result.discoveredLiveModels.none { it.equals(modelNormalized, ignoreCase = true) }
                 ) {
-                    "Key verified! Warning: $modelNormalized was not reported in your key's bidiGenerateContent list. Tap one of the discovered Live models below to select it."
+                    "Key verified! Warning: $modelNormalized was not reported in your key's bidiGenerateContent list. Tap one of the discovered Live models below.$gemmaSummary"
                 } else {
-                    "Gemini API key verified and $modelNormalized is ready for BidiGenerateContent streaming."
+                    "Google AI Studio key verified! $modelNormalized is ready for Gemini Live.$gemmaSummary"
                 }
                 _apiValidationState.value = ApiValidationUiState.Valid(
                     message = modelNotice,
-                    discoveredModels = result.discoveredLiveModels
+                    discoveredModels = result.discoveredLiveModels,
+                    discoveredGemmaModels = result.discoveredGemmaModels,
+                    discoveredReasoningModels = result.discoveredReasoningModels
                 )
             } else {
                 _apiValidationState.value = ApiValidationUiState.Invalid(
@@ -341,7 +465,64 @@ class ScreenSightViewModel(
     fun selectFallbackModel(modelId: String) {
         viewModelScope.launch {
             settingsRepository.updateFallbackModel(modelId)
-            _settingsFeedbackMessage.value = "Fallback model updated."
+            _settingsFeedbackMessage.value = "Live fallback model updated."
+        }
+    }
+
+    fun selectReasoningModel(modelId: String) {
+        viewModelScope.launch {
+            settingsRepository.updateReasoningModel(modelId)
+            _reasoningModelTestState.value = ReasoningModelTestUiState.Idle
+            val desc = VerifiedReasoningModels.findByIdOrCustom(modelId)
+            _settingsFeedbackMessage.value = "Reasoning model set to ${desc.displayName}."
+        }
+    }
+
+    fun selectReasoningFallbackModel(modelId: String) {
+        viewModelScope.launch {
+            settingsRepository.updateReasoningFallbackModel(modelId)
+            val desc = VerifiedReasoningModels.findByIdOrCustom(modelId)
+            _settingsFeedbackMessage.value = "Reasoning fallback set to ${desc.displayName}."
+        }
+    }
+
+    fun updateGemmaReasoningEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.updateGemmaReasoningEnabled(enabled)
+            _settingsFeedbackMessage.value = if (enabled) {
+                "Gemma reasoning enabled (reusing your existing API key)."
+            } else {
+                "Gemma reasoning disabled (using local planner for text tasks)."
+            }
+        }
+    }
+
+    fun updateReasoningRoutingMode(mode: ReasoningRoutingMode) {
+        viewModelScope.launch {
+            settingsRepository.updateReasoningRoutingMode(mode)
+            _settingsFeedbackMessage.value = "Reasoning routing mode: ${mode.shortLabel}."
+        }
+    }
+
+    fun updateReasoningTimeoutSec(timeoutSec: Int) {
+        viewModelScope.launch {
+            settingsRepository.updateReasoningTimeoutSec(timeoutSec)
+        }
+    }
+
+    fun testReasoningModelAvailability(candidateKeyInput: String = "") {
+        val router = aiModelRouter ?: return
+        viewModelScope.launch {
+            _reasoningModelTestState.value = ReasoningModelTestUiState.Testing
+            val report = router.testModelAvailability(
+                candidateKeyInput = candidateKeyInput,
+                modelId = settings.value.reasoningModelId
+            )
+            _reasoningModelTestState.value = if (report.isAvailable) {
+                ReasoningModelTestUiState.Available(report)
+            } else {
+                ReasoningModelTestUiState.Unavailable(report)
+            }
         }
     }
 
@@ -687,7 +868,8 @@ class ScreenSightViewModel(
             appendLine("ScreenSight AI Diagnostics (No Secrets)")
             appendLine("Version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             appendLine("Android API: ${Build.VERSION.SDK_INT} (${Build.MODEL})")
-            appendLine("Model: ${cur.selectedModelId} | Fallback: ${cur.fallbackModelId}")
+            appendLine("Live Model: ${cur.selectedModelId} | Fallback: ${cur.fallbackModelId}")
+            appendLine("Reasoning Model: ${cur.reasoningModelId} (enabled=${cur.gemmaReasoningEnabled}, mode=${cur.reasoningRoutingMode.name}, fallback=${cur.reasoningFallbackModelId})")
             appendLine("API Key Status: ${if (hasApiKey.value) "Configured (${apiKeySource.value.name})" else "Not Configured"}")
             appendLine("Permissions: Mic=${perm.hasMicrophone}, A11y=${perm.isAgentControlReady}, Overlay=${perm.canDrawOverlays}, Notif=${perm.hasNotifications}")
             appendLine("Registered Tools: ${discoveredTools.value.size}")
@@ -881,8 +1063,27 @@ class ScreenSightViewModel(
                 executeSafePlan = false
             )
             _lastMultiAgentContext.value = ctx
-            when (val created = longTermTaskOrchestrator.createTask(clean, ctx.plannedSubtasks)) {
+
+            // If Gemma returned a direct informational answer with no device tools needed, show it cleanly
+            if (ctx.plannedSubtasks.isEmpty() && !ctx.directAnswer.isNullOrBlank()) {
+                val badge = ctx.modelUsage?.let { usage ->
+                    if (usage.usedFallback) "${usage.modelDisplayName} • Fallback" else usage.modelDisplayName
+                } ?: "Gemma Reasoning"
+                sessionManager.appendReasoningTranscriptExchange(
+                    userText = clean,
+                    assistantReply = ctx.directAnswer,
+                    modelBadge = badge
+                )
+                _autonomousFeedbackMessage.value = "[$badge] ${ctx.directAnswer.take(180)}"
+                return@launch
+            }
+
+            val usageTag = ctx.modelUsage?.toCompactCheckpointTag()
+            when (val created = longTermTaskOrchestrator.createTask(clean, ctx.plannedSubtasks, modelUsageNote = usageTag)) {
                 is LongTermTaskOrchestrator.CreateTaskOutcome.Created -> {
+                    ctx.modelUsage?.let { usage ->
+                        aiModelRouter?.attachModelUsageToTask(created.task.taskId, usage)
+                    }
                     val runRes = longTermTaskOrchestrator.runTask(created.task.taskId)
                     _autonomousFeedbackMessage.value = formatLongTermRunOutcome(runRes)
                     refreshDynamicToolsAndMetrics()
@@ -914,7 +1115,10 @@ class ScreenSightViewModel(
 
     fun retryLongTermTask(taskId: String) {
         viewModelScope.launch {
-            longTermTaskOrchestrator.retryFailedSubtasks(taskId)
+            val guided = longTermTaskOrchestrator.attemptGuidedRecovery(taskId)
+            if (guided !is LongTermTaskOrchestrator.CreateTaskOutcome.Created) {
+                longTermTaskOrchestrator.retryFailedSubtasks(taskId)
+            }
             val res = longTermTaskOrchestrator.runTask(taskId)
             _autonomousFeedbackMessage.value = formatLongTermRunOutcome(res)
             refreshDynamicToolsAndMetrics()
@@ -1251,7 +1455,9 @@ class ScreenSightViewModel(
                         selfReflectionEngine = container.selfReflectionEngine,
                         proactiveAssistantEngine = container.proactiveAssistantEngine,
                         multiAgentOrchestrator = container.multiAgentOrchestrator,
-                        safeWebAutomationManager = container.safeWebAutomationManager
+                        safeWebAutomationManager = container.safeWebAutomationManager,
+                        aiModelRouter = container.aiModelRouter,
+                        neyaAssistantController = container.neyaAssistantController
                     ) as T
                 }
             }

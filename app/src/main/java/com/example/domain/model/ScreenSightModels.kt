@@ -245,7 +245,16 @@ data class AppSettings(
     val completionNotificationsEnabled: Boolean = true,
     val failureNotificationsEnabled: Boolean = true,
     val scheduledTaskNotificationsEnabled: Boolean = true,
-    val notificationVibrationEnabled: Boolean = true
+    val notificationVibrationEnabled: Boolean = true,
+    val reasoningModelId: String = com.example.data.ai.VerifiedReasoningModels.DEFAULT_PRIMARY.id,
+    val reasoningFallbackModelId: String = com.example.data.ai.VerifiedReasoningModels.DEFAULT_FALLBACK.id,
+    val gemmaReasoningEnabled: Boolean = true,
+    val reasoningRoutingMode: com.example.data.ai.ReasoningRoutingMode = com.example.data.ai.ReasoningRoutingMode.AUTO_COMPLEX,
+    val reasoningTimeoutSec: Int = 25,
+    val heyNeyaEnabled: Boolean = false,
+    val wakeDetectionMode: com.example.assistant.WakeDetectionMode = com.example.assistant.WakeDetectionMode.MANUAL_ONLY,
+    val assistantOnboardingDismissed: Boolean = false,
+    val wakeFallbackPreference: String = "manual"
 ) {
     companion object {
         const val DEFAULT_SYSTEM_INSTRUCTION = """You are ScreenSight AI, a real-time visual assistant.

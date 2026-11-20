@@ -84,7 +84,8 @@ class AgentCoordinator(
     private val skillLearningEngine: SkillLearningEngine = SkillLearningEngine(toolRegistry),
     private val isMemoryEnabledProvider: () -> Boolean = { true },
     private val dynamicToolManager: DynamicToolManager? = null,
-    private val selfReflectionEngine: SelfReflectionEngine? = null
+    private val selfReflectionEngine: SelfReflectionEngine? = null,
+    private val gemmaReasoningEngine: GemmaAgentReasoningEngine? = null
 ) {
     @Volatile
     var autonomyLevel: com.example.domain.model.AutonomyLevel = com.example.domain.model.AutonomyLevel.BALANCED
@@ -92,6 +93,20 @@ class AgentCoordinator(
 
     fun updateExecutionConfig(newConfig: AgentExecutionConfig) {
         config = newConfig
+    }
+
+    suspend fun assistScreenVerificationWithGemma(
+        goal: String,
+        expectedOutcome: String
+    ): GemmaAgentReasoningEngine.VerificationAssistResult? {
+        val engine = gemmaReasoningEngine ?: return null
+        val observed = screenSnapshotProvider()?.toSafePromptSummary().orEmpty()
+        return engine.assistVerification(
+            goal = goal,
+            expectedOutcome = expectedOutcome,
+            observedScreenSummary = observed,
+            taskIdForTelemetry = currentTaskId
+        )
     }
 
     fun updateAutonomyLevel(level: com.example.domain.model.AutonomyLevel) {

@@ -11,6 +11,7 @@ import com.example.agent.AgentToolRegistry
 import com.example.agent.AppLauncher
 import com.example.agent.BanglaVoiceFeedbackManager
 import com.example.agent.DynamicToolManager
+import com.example.agent.GemmaAgentReasoningEngine
 import com.example.agent.IntelligentMemoryRetriever
 import com.example.agent.LongTermTaskOrchestrator
 import com.example.agent.MultiAgentOrchestrator
@@ -20,6 +21,12 @@ import com.example.agent.SafeWebAutomationManager
 import com.example.agent.SelfReflectionEngine
 import com.example.agent.SkillLearningEngine
 import com.example.agent.TrustedContactsRepository
+import com.example.assistant.NeyaAssistantController
+import com.example.data.ai.AIModelRouter
+import com.example.data.ai.GeminiLiveProviderAdapter
+import com.example.data.ai.GeminiTextProvider
+import com.example.data.ai.GemmaReasoningProvider
+import com.example.data.ai.GoogleGenAiRestClient
 import com.example.data.local.ApiKeyRepository
 import com.example.data.local.ApiKeyStorage
 import com.example.data.local.SettingsRepository
@@ -31,6 +38,7 @@ import com.example.data.local.schedule.ScheduledTaskRepository
 import com.example.data.local.skill.AgentSkillRepository
 import com.example.data.remote.GeminiWebSocketClient
 import com.example.data.repository.GeminiLiveRepository
+import com.example.domain.model.AppSettings
 import com.example.domain.usecase.SendScreenFrameUseCase
 import com.example.domain.usecase.SendTextMessageUseCase
 import com.example.domain.usecase.StartAudioUseCase
@@ -110,6 +118,26 @@ class AppContainer(context: Context) {
     val selfReflectionEngine = SelfReflectionEngine(metricDao = toolMetricDao)
     val skillLearningEngine = SkillLearningEngine(sharedToolRegistry)
 
+    @Volatile
+    private var latestSettingsSnapshot: AppSettings = AppSettings()
+
+    // Advanced AI Model Layer: Gemma 4 Reasoning + Gemini Text Fallback (reusing same encrypted API key)
+    val googleGenAiRestClient = GoogleGenAiRestClient()
+    val gemmaReasoningProvider = GemmaReasoningProvider(googleGenAiRestClient)
+    val geminiTextProvider = GeminiTextProvider(googleGenAiRestClient)
+    val geminiLiveProviderAdapter = GeminiLiveProviderAdapter(geminiLiveRepository)
+    val aiModelRouter = AIModelRouter(
+        apiKeyStorage = apiKeyRepository,
+        gemmaProvider = gemmaReasoningProvider,
+        geminiTextProvider = geminiTextProvider,
+        settingsProvider = { latestSettingsSnapshot }
+    )
+    val gemmaReasoningEngine = GemmaAgentReasoningEngine(
+        modelRouter = aiModelRouter,
+        toolRegistry = sharedToolRegistry,
+        dynamicToolManager = dynamicToolManager
+    )
+
     val agentCoordinator = AgentCoordinator(
         geminiRepository = geminiLiveRepository,
         actionExecutor = agentActionExecutor,
@@ -124,7 +152,8 @@ class AppContainer(context: Context) {
         skillLearningEngine = skillLearningEngine,
         isMemoryEnabledProvider = { memoryEnabledState.get() },
         dynamicToolManager = dynamicToolManager,
-        selfReflectionEngine = selfReflectionEngine
+        selfReflectionEngine = selfReflectionEngine,
+        gemmaReasoningEngine = gemmaReasoningEngine
     ).also { coordinator ->
         // Inspect local incomplete tasks on startup without ever auto-replaying sensitive actions
         coordinator.launchStartupCheckpointInspection()
@@ -133,7 +162,8 @@ class AppContainer(context: Context) {
     val longTermTaskOrchestrator = LongTermTaskOrchestrator(
         repository = longTermTaskRepository,
         dynamicToolManager = dynamicToolManager,
-        toolExecutor = { req, confirmed -> agentActionExecutor.execute(req, confirmed) }
+        toolExecutor = { req, confirmed -> agentActionExecutor.execute(req, confirmed) },
+        gemmaReasoningEngine = gemmaReasoningEngine
     )
 
     val taskScheduler = AgentTaskScheduler(
@@ -149,7 +179,8 @@ class AppContainer(context: Context) {
         dynamicToolManager = dynamicToolManager,
         memoryRetriever = memoryRetriever,
         skillLearningEngine = skillLearningEngine,
-        toolExecutor = { req, confirmed -> agentActionExecutor.execute(req, confirmed) }
+        toolExecutor = { req, confirmed -> agentActionExecutor.execute(req, confirmed) },
+        gemmaReasoningEngine = gemmaReasoningEngine
     )
 
     val appContext: Context = context.applicationContext
@@ -159,6 +190,11 @@ class AppContainer(context: Context) {
     init {
         appScope.launch {
             settingsRepository.settingsFlow.collectLatest { settings ->
+                latestSettingsSnapshot = settings
+                aiModelRouter.syncIndicatorWithSettings(
+                    settings = settings,
+                    isLiveSessionActive = geminiLiveProviderAdapter.isLiveSessionActive()
+                )
                 memoryEnabledState.set(settings.memoryEnabled)
                 proactiveEnabledState.set(settings.proactiveSuggestionsEnabled)
                 banglaVoiceFeedbackManager.setSpeechRate(settings.ttsSpeechRate)
@@ -198,6 +234,19 @@ class AppContainer(context: Context) {
     val sendScreenFrameUseCase = SendScreenFrameUseCase(sessionManager)
     val startAudioUseCase = StartAudioUseCase(sessionManager)
     val sendTextMessageUseCase = SendTextMessageUseCase(sessionManager)
+
+    // Native Android Digital Assistant Controller (shares existing engine, zero duplicates)
+    val neyaAssistantController = NeyaAssistantController(
+        context = context,
+        sessionManager = sessionManager,
+        agentCoordinator = agentCoordinator,
+        multiAgentOrchestrator = multiAgentOrchestrator,
+        longTermTaskOrchestrator = longTermTaskOrchestrator,
+        skillRepository = skillRepository,
+        settingsRepository = settingsRepository,
+        apiKeyStorage = apiKeyRepository,
+        aiModelRouter = aiModelRouter
+    )
 
     fun shutdown() {
         appScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()

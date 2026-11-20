@@ -132,7 +132,8 @@ fun TasksScreen(
     onCancelAllBackgroundWork: () -> Unit,
     onDismissFeedback: () -> Unit,
     onOpenDrawer: () -> Unit,
-    onOpenToolsAndDiagnostics: () -> Unit
+    onOpenToolsAndDiagnostics: () -> Unit,
+    taskModelUsageMap: Map<String, com.example.data.ai.ModelUsageRecord> = emptyMap()
 ) {
     // 0 = Active, 1 = Scheduled, 2 = Completed, 3 = Failed
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
@@ -164,6 +165,7 @@ fun TasksScreen(
         TaskDetailsBottomSheet(
             task = inspectedTask,
             multiAgentContext = lastMultiAgentContext?.takeIf { it.sanitizedGoal.equals(inspectedTask.goal, ignoreCase = true) },
+            modelUsageRecord = taskModelUsageMap[inspectedTask.taskId],
             onDismiss = { inspectedTaskId = null },
             onPause = { onPauseTask(inspectedTask.taskId) },
             onResume = { onResumeTask(inspectedTask.taskId) },
@@ -709,6 +711,7 @@ private fun TaskHistoryListContent(
 private fun TaskDetailsBottomSheet(
     task: LongTermTask,
     multiAgentContext: MultiAgentOrchestrator.SharedAgentTaskContext?,
+    modelUsageRecord: com.example.data.ai.ModelUsageRecord? = null,
     onDismiss: () -> Unit,
     onPause: () -> Unit,
     onResume: () -> Unit,
@@ -752,6 +755,56 @@ private fun TaskDetailsBottomSheet(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary
             )
+        }
+
+        val effectiveUsage = modelUsageRecord ?: multiAgentContext?.modelUsage
+        if (effectiveUsage != null) {
+            FeatureCard(modifier = Modifier.testTag("task_details_model_usage_card")) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "AI Model Usage (Sanitized)",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    StatusIndicator(
+                        label = if (effectiveUsage.succeeded) {
+                            if (effectiveUsage.usedFallback) "Fallback OK" else "Success"
+                        } else {
+                            "Fallback Local"
+                        },
+                        tone = if (effectiveUsage.succeeded) StatusTone.POSITIVE else StatusTone.WARNING
+                    )
+                }
+                Text(
+                    text = "Model: ${effectiveUsage.modelDisplayName} (${effectiveUsage.providerId.displayName})",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = buildString {
+                        append("Stage: ${effectiveUsage.taskStage.displayLabel}")
+                        if (effectiveUsage.promptTokens > 0 || effectiveUsage.outputTokens > 0) {
+                            append(" • Tokens: ${effectiveUsage.promptTokens} in / ${effectiveUsage.outputTokens} out")
+                        }
+                        if (effectiveUsage.latencyMs > 0) {
+                            append(" • ${effectiveUsage.latencyMs}ms")
+                        }
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                effectiveUsage.fallbackNote?.takeIf { it.isNotBlank() }?.let { note ->
+                    Text(
+                        text = "Fallback reason: $note",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AmberThinking
+                    )
+                }
+            }
         }
 
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

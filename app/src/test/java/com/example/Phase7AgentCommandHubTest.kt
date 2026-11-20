@@ -28,7 +28,7 @@ import org.robolectric.annotation.Config
  * & Functional UX Upgrade across Home, Agent, Tasks, Library, and Settings.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [36], qualifiers = "w411dp-h891dp")
 class Phase7AgentCommandHubTest {
 
     @get:Rule

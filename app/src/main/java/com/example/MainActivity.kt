@@ -24,6 +24,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,6 +73,7 @@ import com.example.ui.screens.SettingsHubScreen
 import com.example.ui.screens.TasksScreen
 import com.example.ui.screens.TrustedContactsScreen
 import com.example.ui.theme.ScreenSightTheme
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 object ScreenRoutes {
@@ -108,9 +110,12 @@ object ScreenRoutes {
 }
 
 class MainActivity : ComponentActivity() {
+    private val assistInvocationEvents = MutableStateFlow(0L)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        inspectAssistIntent(intent)
 
         val appContainer = (application as ScreenSightApp).container
 
@@ -119,6 +124,7 @@ class MainActivity : ComponentActivity() {
                 factory = ScreenSightViewModel.provideFactory(appContainer)
             )
             val settings by viewModel.settings.collectAsStateWithLifecycle()
+            val assistEventId by assistInvocationEvents.collectAsStateWithLifecycle()
 
             val useDarkTheme = when (settings.themePreference) {
                 ThemePreference.SYSTEM -> isSystemInDarkTheme()
@@ -132,15 +138,34 @@ class MainActivity : ComponentActivity() {
                 animationsEnabled = settings.animationsEnabled,
                 hapticsEnabled = settings.hapticFeedbackEnabled
             ) {
-                ScreenSightAppNavHost(viewModel = viewModel)
+                ScreenSightAppNavHost(
+                    viewModel = viewModel,
+                    assistEventId = assistEventId
+                )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        inspectAssistIntent(intent)
+    }
+
+    private fun inspectAssistIntent(incoming: Intent?) {
+        if (incoming == null) return
+        val isAssist = incoming.action == Intent.ACTION_ASSIST ||
+            incoming.getBooleanExtra(com.example.assistant.NeyaAssistantController.EXTRA_OPEN_ASSISTANT_CONSOLE, false)
+        if (isAssist) {
+            assistInvocationEvents.value = System.currentTimeMillis()
         }
     }
 }
 
 @Composable
 fun ScreenSightAppNavHost(
-    viewModel: ScreenSightViewModel
+    viewModel: ScreenSightViewModel,
+    assistEventId: Long = 0L
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -207,6 +232,14 @@ fun ScreenSightAppNavHost(
     // Phase 6: Storage & Settings Feedback State
     val storageSnapshot by viewModel.storageSnapshot.collectAsStateWithLifecycle()
     val settingsFeedbackMessage by viewModel.settingsFeedbackMessage.collectAsStateWithLifecycle()
+
+    // Advanced AI Model State (Gemma 4 Reasoning + Active Model Indicator + Task Usage)
+    val activeModelIndicator by viewModel.activeModelIndicator.collectAsStateWithLifecycle()
+    val reasoningTestState by viewModel.reasoningModelTestState.collectAsStateWithLifecycle()
+    val taskModelUsageMap by viewModel.taskModelUsageMap.collectAsStateWithLifecycle()
+
+    // Native Android Digital Assistant State (Neya & Hey Neya)
+    val neyaAssistantState by viewModel.neyaAssistantState.collectAsStateWithLifecycle()
 
     // Always re-check real OS permissions (especially Accessibility & Overlay) when user returns to app
     DisposableEffect(lifecycleOwner) {
@@ -291,6 +324,26 @@ fun ScreenSightAppNavHost(
         viewModel.refreshPermissions()
     }
 
+    // Official Android RoleManager.ROLE_ASSISTANT / Voice Input Settings launcher
+    // Always verifies real system role state on return — never assumes grant on tap.
+    val defaultAssistantRoleLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val cancelled = result.resultCode == Activity.RESULT_CANCELED
+        viewModel.refreshNeyaAssistantStatus(wasCancelledByUser = cancelled)
+    }
+
+    fun launchDefaultAssistantRoleChooser() {
+        val intent = viewModel.createDefaultAssistantRequestIntent()
+        val launched = runCatching {
+            defaultAssistantRoleLauncher.launch(intent)
+        }.isSuccess
+        if (!launched) {
+            val fallback = Intent(Settings.ACTION_VOICE_INPUT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching { context.startActivity(fallback) }
+        }
+    }
+
     fun requestPermissionsAndLaunchLive(autoPromptScreenShare: Boolean = false) {
         val needed = mutableListOf<String>()
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -341,6 +394,13 @@ fun ScreenSightAppNavHost(
     val startDestination = remember {
         settings.defaultLandingScreen.takeIf { it in ScreenRoutes.PRIMARY_TAB_ROUTES }
             ?: ScreenRoutes.ROUTE_HOME
+    }
+
+    LaunchedEffect(assistEventId) {
+        if (assistEventId > 0L) {
+            viewModel.onAssistIntentReceived(com.example.assistant.AssistantInvocationSource.ASSIST_INTENT)
+            navigateToPrimaryTab(ScreenRoutes.ROUTE_LIVE_ASSISTANT)
+        }
     }
 
     ModalNavigationDrawer(
@@ -554,6 +614,13 @@ fun ScreenSightAppNavHost(
                         },
                         onRunCustomAlarm = { hour24, minute, label ->
                             viewModel.runQuickSetAlarm(hour24 = hour24, minute = minute, label = label)
+                        },
+                        neyaAssistantState = neyaAssistantState,
+                        onOpenNeyaAssistantSettings = {
+                            viewModel.refreshNeyaAssistantStatus()
+                            navController.navigate(ScreenRoutes.settingsCategoryRoute(SettingsCategory.VOICE_AUDIO)) {
+                                launchSingleTop = true
+                            }
                         }
                     )
                 }
@@ -630,7 +697,9 @@ fun ScreenSightAppNavHost(
                                     context.startActivity(viewModel.createOverlaySettingsIntent())
                                 }
                             }
-                        }
+                        },
+                        activeModelIndicator = activeModelIndicator,
+                        neyaAssistantState = neyaAssistantState
                     )
                 }
 
@@ -664,7 +733,8 @@ fun ScreenSightAppNavHost(
                         onOpenToolsAndDiagnostics = {
                             viewModel.refreshDynamicToolsAndMetrics()
                             navController.navigate(ScreenRoutes.ROUTE_AUTONOMOUS_HUB) { launchSingleTop = true }
-                        }
+                        },
+                        taskModelUsageMap = taskModelUsageMap
                     )
                 }
 
@@ -722,7 +792,8 @@ fun ScreenSightAppNavHost(
                         onOpenPermissions = {
                             viewModel.refreshPermissions()
                             navController.navigate(ScreenRoutes.ROUTE_AGENT_PERMISSIONS) { launchSingleTop = true }
-                        }
+                        },
+                        neyaAssistantState = neyaAssistantState
                     )
                 }
 
@@ -792,7 +863,16 @@ fun ScreenSightAppNavHost(
                         onOpenApiSettings = {
                             navController.navigate(ScreenRoutes.ROUTE_API_SETTINGS) { launchSingleTop = true }
                         },
-                        onBuildDiagnosticsText = { viewModel.buildSanitizedDiagnosticsText() }
+                        onBuildDiagnosticsText = { viewModel.buildSanitizedDiagnosticsText() },
+                        neyaAssistantState = neyaAssistantState,
+                        onRequestDefaultAssistantRole = { launchDefaultAssistantRoleChooser() },
+                        onRefreshAssistantStatus = { viewModel.refreshNeyaAssistantStatus(wasCancelledByUser = false) },
+                        onToggleHeyNeya = { viewModel.updateHeyNeyaEnabled(it) },
+                        onSelectWakeMode = { viewModel.updateWakeDetectionMode(it) },
+                        onInvokeNeyaManually = {
+                            viewModel.invokeNeyaAssistantManually()
+                            navigateToPrimaryTab(ScreenRoutes.ROUTE_LIVE_ASSISTANT)
+                        }
                     )
                 }
 
@@ -978,6 +1058,13 @@ fun ScreenSightAppNavHost(
                         onRemoveApiKey = { viewModel.removeApiKey() },
                         onSelectModel = { viewModel.selectModel(it) },
                         onSelectFallbackModel = { viewModel.selectFallbackModel(it) },
+                        reasoningTestState = reasoningTestState,
+                        onSelectReasoningModel = { viewModel.selectReasoningModel(it) },
+                        onSelectReasoningFallbackModel = { viewModel.selectReasoningFallbackModel(it) },
+                        onToggleGemmaReasoning = { viewModel.updateGemmaReasoningEnabled(it) },
+                        onSelectReasoningRoutingMode = { viewModel.updateReasoningRoutingMode(it) },
+                        onUpdateReasoningTimeoutSec = { viewModel.updateReasoningTimeoutSec(it) },
+                        onTestReasoningModel = { viewModel.testReasoningModelAvailability(it) },
                         onBack = { navController.popBackStack() }
                     )
                 }

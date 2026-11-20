@@ -47,6 +47,8 @@ sealed class GeminiServerEvent {
 data class ApiValidationResult(
     val isValid: Boolean,
     val discoveredLiveModels: List<String> = emptyList(),
+    val discoveredGemmaModels: List<String> = emptyList(),
+    val discoveredReasoningModels: List<String> = emptyList(),
     val error: ScreenSightError? = null
 )
 
@@ -80,8 +82,8 @@ class GeminiWebSocketClient(
     val outboundQueueBytes: StateFlow<Long> = _outboundQueueBytes.asStateFlow()
 
     /**
-     * Validates the user's Gemini API key and discovers all models supporting `bidiGenerateContent`
-     * from the authoritative `GET /v1beta/models` endpoint.
+     * Validates the user's Gemini API key and discovers models supporting `bidiGenerateContent`
+     * (Gemini Live) AND `generateContent` (Gemma 4 / Gemini text reasoning) from `GET /v1beta/models`.
      */
     suspend fun validateApiKeyAndModel(apiKey: String, selectedModelId: String): ApiValidationResult =
         withContext(Dispatchers.IO) {
@@ -89,8 +91,12 @@ class GeminiWebSocketClient(
             if (trimmedKey.isEmpty()) {
                 return@withContext ApiValidationResult(false, error = ScreenSightError.MissingApiKey)
             }
-            val url = "${GeminiLiveConfigBuilder.GEMINI_MODELS_REST_BASE_URL}/models?pageSize=100&key=$trimmedKey"
-            val request = Request.Builder().url(url).get().build()
+            val url = "${GeminiLiveConfigBuilder.GEMINI_MODELS_REST_BASE_URL}/models?pageSize=200"
+            val request = Request.Builder()
+                .url(url)
+                .header("x-goog-api-key", trimmedKey)
+                .get()
+                .build()
 
             try {
                 okHttpClient.newCall(request).execute().use { response ->
@@ -107,6 +113,8 @@ class GeminiWebSocketClient(
                     val root = GeminiLiveJson.json.parseToJsonElement(bodyStr).jsonObject
                     val modelsArray = root["models"]?.jsonArray ?: emptyList()
                     val bidiModels = mutableListOf<String>()
+                    val gemmaModels = mutableListOf<String>()
+                    val reasoningModels = mutableListOf<String>()
 
                     for (elem in modelsArray) {
                         val obj = elem.jsonObject
@@ -117,11 +125,22 @@ class GeminiWebSocketClient(
                         if (methods.any { it.equals("bidiGenerateContent", ignoreCase = true) }) {
                             bidiModels.add(name)
                         }
+                        if (methods.any { it.equals("generateContent", ignoreCase = true) }) {
+                            val lower = name.lowercase()
+                            if (lower.contains("gemma")) {
+                                gemmaModels.add(name)
+                                reasoningModels.add(name)
+                            } else if (lower.contains("gemini") && !lower.contains("embedding")) {
+                                reasoningModels.add(name)
+                            }
+                        }
                     }
 
                     return@withContext ApiValidationResult(
                         isValid = true,
-                        discoveredLiveModels = bidiModels
+                        discoveredLiveModels = bidiModels.distinct(),
+                        discoveredGemmaModels = gemmaModels.distinct(),
+                        discoveredReasoningModels = reasoningModels.distinct()
                     )
                 }
             } catch (e: Exception) {

@@ -173,7 +173,14 @@ fun SettingsCategoryScreen(
     // Security (K) & About (L)
     onOpenPrivacyPolicy: () -> Unit,
     onOpenApiSettings: () -> Unit,
-    onBuildDiagnosticsText: () -> String
+    onBuildDiagnosticsText: () -> String,
+    // Native Android Assistant & Hey Neya (integrated into Voice & Audio)
+    neyaAssistantState: com.example.assistant.NeyaAssistantRuntimeState = com.example.assistant.NeyaAssistantRuntimeState(),
+    onRequestDefaultAssistantRole: () -> Unit = {},
+    onRefreshAssistantStatus: () -> Unit = {},
+    onToggleHeyNeya: (Boolean) -> Unit = {},
+    onSelectWakeMode: (com.example.assistant.WakeDetectionMode) -> Unit = {},
+    onInvokeNeyaManually: () -> Unit = {}
 ) {
     BackHandler(onBack = onBack)
 
@@ -411,6 +418,16 @@ fun SettingsCategoryScreen(
                     }
 
                     SettingsCategory.VOICE_AUDIO -> {
+                        com.example.ui.components.NeyaAssistantSettingsSection(
+                            settings = settings,
+                            assistantState = neyaAssistantState,
+                            onRequestDefaultAssistantRole = onRequestDefaultAssistantRole,
+                            onRefreshAssistantStatus = onRefreshAssistantStatus,
+                            onToggleHeyNeya = onToggleHeyNeya,
+                            onSelectWakeMode = onSelectWakeMode,
+                            onInvokeNeyaManually = onInvokeNeyaManually
+                        )
+
                         SettingsGroup(title = "Voice Input & Output") {
                             SettingsToggleItem(
                                 icon = Icons.Default.Mic,

@@ -179,7 +179,9 @@ fun HomeScreen(
     onRunProactiveSuggestion: (ProactiveAssistantEngine.ProactiveSuggestion) -> Unit = {},
     onDismissProactiveSuggestion: (String) -> Unit = {},
     onRunCustomOpenApp: (String) -> Unit = { onQuickOpenYouTube() },
-    onRunCustomAlarm: (Int, Int, String) -> Unit = { _, _, _ -> onQuickSetAlarm() }
+    onRunCustomAlarm: (Int, Int, String) -> Unit = { _, _, _ -> onQuickSetAlarm() },
+    neyaAssistantState: com.example.assistant.NeyaAssistantRuntimeState = com.example.assistant.NeyaAssistantRuntimeState(),
+    onOpenNeyaAssistantSettings: () -> Unit = onNavigateToSettingsHub
 ) {
     val selectedModel = GeminiLiveModel.findByIdOrCustom(settings.selectedModelId)
     val greeting = remember {
@@ -377,9 +379,16 @@ fun HomeScreen(
                 )
 
                 // 1. Actionable Agent Readiness Card (every capability chip fixes its exact permission)
+                val reasoningLabel = if (settings.gemmaReasoningEnabled &&
+                    settings.reasoningRoutingMode != com.example.data.ai.ReasoningRoutingMode.LOCAL_ONLY
+                ) {
+                    com.example.data.ai.VerifiedReasoningModels.findByIdOrCustom(settings.reasoningModelId).displayName
+                } else {
+                    "Local Planner"
+                }
                 AgentStatusCard(
                     isReady = hasApiKey && permissions.hasMicrophone && permissions.isAgentControlReady,
-                    modelName = "${selectedModel.displayName} • Direct BYOK",
+                    modelName = "${selectedModel.displayName} • $reasoningLabel",
                     apiStatusLabel = if (hasApiKey) "Ready" else "Missing",
                     accessibilityReady = permissions.isAgentControlReady,
                     microphoneReady = permissions.hasMicrophone,
@@ -418,7 +427,7 @@ fun HomeScreen(
                         )
                     }
 
-                    // Inline Autonomy Level Switcher
+                    // Inline Autonomy Level Switcher + Real Neya Native Assistant Role Pill
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -437,6 +446,22 @@ fun HomeScreen(
                                 modifier = Modifier.testTag("home_autonomy_${level.name.lowercase()}")
                             )
                         }
+                        FilterChip(
+                            selected = neyaAssistantState.roleStatus.isActive,
+                            onClick = onOpenNeyaAssistantSettings,
+                            label = {
+                                Text(
+                                    text = if (neyaAssistantState.roleStatus.isActive) {
+                                        "Neya Assistant: Active"
+                                    } else {
+                                        "Neya Assistant: Setup"
+                                    },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1
+                                )
+                            },
+                            modifier = Modifier.testTag("home_neya_assistant_chip")
+                        )
                     }
 
                     // Direct Autonomous Command Input

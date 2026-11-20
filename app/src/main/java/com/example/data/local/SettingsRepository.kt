@@ -102,7 +102,26 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             completionNotificationsEnabled = prefs[KEY_COMPLETION_NOTIFICATIONS] ?: true,
             failureNotificationsEnabled = prefs[KEY_FAILURE_NOTIFICATIONS] ?: true,
             scheduledTaskNotificationsEnabled = prefs[KEY_SCHEDULED_NOTIFICATIONS] ?: true,
-            notificationVibrationEnabled = prefs[KEY_NOTIFICATION_VIBRATION] ?: true
+            notificationVibrationEnabled = prefs[KEY_NOTIFICATION_VIBRATION] ?: true,
+            reasoningModelId = prefs[KEY_REASONING_MODEL]
+                ?.takeIf { it.isNotBlank() }
+                ?.let { com.example.data.ai.VerifiedReasoningModels.normalizeReasoningModelId(it) }
+                ?: com.example.data.ai.VerifiedReasoningModels.DEFAULT_PRIMARY.id,
+            reasoningFallbackModelId = prefs[KEY_REASONING_FALLBACK_MODEL]
+                ?.takeIf { it.isNotBlank() }
+                ?.let { com.example.data.ai.VerifiedReasoningModels.normalizeReasoningModelId(it) }
+                ?: com.example.data.ai.VerifiedReasoningModels.DEFAULT_FALLBACK.id,
+            gemmaReasoningEnabled = prefs[KEY_GEMMA_REASONING_ENABLED] ?: true,
+            reasoningRoutingMode = prefs[KEY_REASONING_ROUTING_MODE]
+                ?.let { runCatching { com.example.data.ai.ReasoningRoutingMode.valueOf(it) }.getOrNull() }
+                ?: com.example.data.ai.ReasoningRoutingMode.AUTO_COMPLEX,
+            reasoningTimeoutSec = (prefs[KEY_REASONING_TIMEOUT_SEC] ?: 25).coerceIn(10, 90),
+            heyNeyaEnabled = prefs[KEY_HEY_NEYA_ENABLED] ?: false,
+            wakeDetectionMode = prefs[KEY_WAKE_DETECTION_MODE]
+                ?.let { runCatching { com.example.assistant.WakeDetectionMode.valueOf(it) }.getOrNull() }
+                ?: com.example.assistant.WakeDetectionMode.MANUAL_ONLY,
+            assistantOnboardingDismissed = prefs[KEY_ASSISTANT_ONBOARDING_DISMISSED] ?: false,
+            wakeFallbackPreference = prefs[KEY_WAKE_FALLBACK_PREFERENCE] ?: "manual"
         )
     }
 
@@ -286,6 +305,53 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         }
     }
 
+    suspend fun updateReasoningModel(modelId: String) {
+        val clean = modelId.trim()
+        if (clean.isNotEmpty()) {
+            val normalized = com.example.data.ai.VerifiedReasoningModels.normalizeReasoningModelId(clean)
+            editPrefs { it[KEY_REASONING_MODEL] = normalized }
+        }
+    }
+
+    suspend fun updateReasoningFallbackModel(modelId: String) {
+        val clean = modelId.trim()
+        if (clean.isNotEmpty()) {
+            val normalized = com.example.data.ai.VerifiedReasoningModels.normalizeReasoningModelId(clean)
+            editPrefs { it[KEY_REASONING_FALLBACK_MODEL] = normalized }
+        }
+    }
+
+    suspend fun updateGemmaReasoningEnabled(enabled: Boolean) {
+        editPrefs { it[KEY_GEMMA_REASONING_ENABLED] = enabled }
+    }
+
+    suspend fun updateReasoningRoutingMode(mode: com.example.data.ai.ReasoningRoutingMode) {
+        editPrefs { it[KEY_REASONING_ROUTING_MODE] = mode.name }
+    }
+
+    suspend fun updateReasoningTimeoutSec(timeoutSec: Int) {
+        editPrefs { it[KEY_REASONING_TIMEOUT_SEC] = timeoutSec.coerceIn(10, 90) }
+    }
+
+    suspend fun updateHeyNeyaEnabled(enabled: Boolean) {
+        editPrefs { it[KEY_HEY_NEYA_ENABLED] = enabled }
+    }
+
+    suspend fun updateWakeDetectionMode(mode: com.example.assistant.WakeDetectionMode) {
+        editPrefs {
+            it[KEY_WAKE_DETECTION_MODE] = mode.name
+            it[KEY_WAKE_FALLBACK_PREFERENCE] = when (mode) {
+                com.example.assistant.WakeDetectionMode.MANUAL_ONLY -> "manual"
+                com.example.assistant.WakeDetectionMode.DSP_HARDWARE -> "dsp"
+                com.example.assistant.WakeDetectionMode.SOFTWARE_FALLBACK -> "software"
+            }
+        }
+    }
+
+    suspend fun updateAssistantOnboardingDismissed(dismissed: Boolean) {
+        editPrefs { it[KEY_ASSISTANT_ONBOARDING_DISMISSED] = dismissed }
+    }
+
     companion object {
         private val KEY_SELECTED_MODEL = stringPreferencesKey("selected_model_id")
         private val KEY_FALLBACK_MODEL = stringPreferencesKey("fallback_model_id")
@@ -327,5 +393,14 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         private val KEY_FAILURE_NOTIFICATIONS = booleanPreferencesKey("failure_notifications_enabled")
         private val KEY_SCHEDULED_NOTIFICATIONS = booleanPreferencesKey("scheduled_notifications_enabled")
         private val KEY_NOTIFICATION_VIBRATION = booleanPreferencesKey("notification_vibration_enabled")
+        private val KEY_REASONING_MODEL = stringPreferencesKey("reasoning_model_id")
+        private val KEY_REASONING_FALLBACK_MODEL = stringPreferencesKey("reasoning_fallback_model_id")
+        private val KEY_GEMMA_REASONING_ENABLED = booleanPreferencesKey("gemma_reasoning_enabled")
+        private val KEY_REASONING_ROUTING_MODE = stringPreferencesKey("reasoning_routing_mode")
+        private val KEY_REASONING_TIMEOUT_SEC = intPreferencesKey("reasoning_timeout_sec")
+        private val KEY_HEY_NEYA_ENABLED = booleanPreferencesKey("hey_neya_enabled")
+        private val KEY_WAKE_DETECTION_MODE = stringPreferencesKey("wake_detection_mode")
+        private val KEY_ASSISTANT_ONBOARDING_DISMISSED = booleanPreferencesKey("assistant_onboarding_dismissed")
+        private val KEY_WAKE_FALLBACK_PREFERENCE = stringPreferencesKey("wake_fallback_preference")
     }
 }

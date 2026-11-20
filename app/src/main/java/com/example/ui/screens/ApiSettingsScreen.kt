@@ -72,23 +72,33 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Switch
 import com.example.R
+import com.example.data.ai.AIModelDescriptor
+import com.example.data.ai.ReasoningRoutingMode
+import com.example.data.ai.VerifiedReasoningModels
 import com.example.data.local.ApiKeySource
 import com.example.domain.model.AppSettings
 import com.example.domain.model.GeminiLiveModel
 import com.example.ui.ApiValidationUiState
+import com.example.ui.ReasoningModelTestUiState
 import com.example.ui.theme.AmberThinking
 import com.example.ui.theme.EmeraldLive
 
 /**
- * API & Model Settings Screen (Sections 5.2 & 9.3).
+ * API & Model Settings Screen (Sections 5.2, 9.3 & Gemma 4 Reasoning Integration).
  * Features:
- * - Gemini API key input, 1-tap Paste from Clipboard, Show/hide toggle, Validate API key, Save API key, Remove API key.
- * - Explicit distinction between on-device Android Keystore storage and BuildConfig development fallback,
- *   including the security warning that APK-embedded BuildConfig values can be extracted by decompiling the APK.
+ * - Single Google AI Studio API key (BYOK) encrypted on-device with Android Keystore AES-256-GCM
+ *   serving BOTH Gemini Live (WebSocket) and Gemma 4 Reasoning (REST generateContent).
  * - Verified Gemini Live model selector + live `/v1beta/models` discovery + custom model ID entry.
+ * - Verified Gemma 4 Reasoning model selector (`models/gemma-4-31b-it`, `models/gemma-4-26b-a4b-it`),
+ *   routing mode, fallback model, timeout, capability badges, and real model availability probe.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ApiSettingsScreen(
     settings: AppSettings,
@@ -101,6 +111,13 @@ fun ApiSettingsScreen(
     onRemoveApiKey: () -> Unit,
     onSelectModel: (String) -> Unit,
     onSelectFallbackModel: (String) -> Unit = {},
+    reasoningTestState: ReasoningModelTestUiState = ReasoningModelTestUiState.Idle,
+    onSelectReasoningModel: (String) -> Unit = {},
+    onSelectReasoningFallbackModel: (String) -> Unit = {},
+    onToggleGemmaReasoning: (Boolean) -> Unit = {},
+    onSelectReasoningRoutingMode: (ReasoningRoutingMode) -> Unit = {},
+    onUpdateReasoningTimeoutSec: (Int) -> Unit = {},
+    onTestReasoningModel: (String) -> Unit = {},
     onBack: () -> Unit
 ) {
     BackHandler(onBack = onBack)
@@ -201,7 +218,7 @@ fun ApiSettingsScreen(
                         }
 
                         Text(
-                            text = "Enter your Gemini API key below to encrypt and store it on this device using Android Keystore (AES-256-GCM), or copy your key and tap Paste & Save.",
+                            text = "This single Google AI Studio API key powers BOTH Gemini Live (real-time voice/screen) and Gemma 4 (text reasoning & task planning) — no second API key is required. Keys are encrypted on-device via Android Keystore (AES-256-GCM).",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -670,6 +687,260 @@ fun ApiSettingsScreen(
                     }
                 }
 
+                // 3c. Gemma 4 Reasoning & Fallback Configuration (Reusing Same API Key)
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("gemma_reasoning_settings_card"),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
+                ) {
+                    val activeReasoningDesc = VerifiedReasoningModels.findByIdOrCustom(settings.reasoningModelId)
+                    val fallbackReasoningDesc = VerifiedReasoningModels.findByIdOrCustom(settings.reasoningFallbackModelId)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Column {
+                                    Text(
+                                        text = "Gemma 4 Reasoning & Planning",
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Text(
+                                        text = "Active: ${activeReasoningDesc.displayName} • Same API Key",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = if (settings.gemmaReasoningEnabled) EmeraldLive else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Switch(
+                                checked = settings.gemmaReasoningEnabled,
+                                onCheckedChange = onToggleGemmaReasoning,
+                                modifier = Modifier.testTag("gemma_reasoning_toggle")
+                            )
+                        }
+
+                        Text(
+                            text = "Gemini Live handles real-time voice & screen sharing. Gemma 4 (models/gemma-4-31b-it) handles complex text planning, tool selection, recovery & verification on Google's Gemini API using your existing API key.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        // Routing mode selector
+                        Text(
+                            text = "Reasoning Routing Mode",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            ReasoningRoutingMode.entries.forEach { mode ->
+                                FilterChip(
+                                    selected = settings.reasoningRoutingMode == mode,
+                                    onClick = { onSelectReasoningRoutingMode(mode) },
+                                    label = { Text(mode.shortLabel) },
+                                    modifier = Modifier.testTag("reasoning_routing_${mode.name}")
+                                )
+                            }
+                        }
+                        Text(
+                            text = settings.reasoningRoutingMode.description,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        // Discovered Gemma models from Validate
+                        if (validationState is ApiValidationUiState.Valid && validationState.discoveredGemmaModels.isNotEmpty()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(EmeraldLive.copy(alpha = 0.12f))
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "Gemma Models Discovered on Your API Key (${validationState.discoveredGemmaModels.size}):",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = EmeraldLive
+                                )
+                                validationState.discoveredGemmaModels.forEach { discoveredId ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable { onSelectReasoningModel(discoveredId) }
+                                            .padding(vertical = 4.dp, horizontal = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = discoveredId,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = if (settings.reasoningModelId.equals(discoveredId, ignoreCase = true)) "ACTIVE" else "Tap to Use",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Verified Reasoning Models List
+                        VerifiedReasoningModels.ALL_VERIFIED_REASONING_MODELS.forEach { model ->
+                            ReasoningModelOptionItem(
+                                model = model,
+                                isSelected = settings.reasoningModelId.equals(model.id, ignoreCase = true),
+                                onSelect = { onSelectReasoningModel(model.id) }
+                            )
+                        }
+
+                        // Reasoning Fallback selector
+                        Text(
+                            text = "Reasoning Fallback Model (${fallbackReasoningDesc.displayName})",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf(
+                                VerifiedReasoningModels.GEMMA_4_26B_A4B_IT,
+                                VerifiedReasoningModels.GEMINI_2_5_FLASH,
+                                VerifiedReasoningModels.GEMMA_4_31B_IT
+                            ).forEach { fb ->
+                                FilterChip(
+                                    selected = settings.reasoningFallbackModelId.equals(fb.id, ignoreCase = true),
+                                    onClick = { onSelectReasoningFallbackModel(fb.id) },
+                                    label = { Text(fb.displayName) },
+                                    modifier = Modifier.testTag("reasoning_fallback_${fb.shortId}")
+                                )
+                            }
+                        }
+
+                        // Request Timeout chips
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Request Timeout",
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf(15, 25, 45).forEach { sec ->
+                                    FilterChip(
+                                        selected = settings.reasoningTimeoutSec == sec,
+                                        onClick = { onUpdateReasoningTimeoutSec(sec) },
+                                        label = { Text("${sec}s") },
+                                        modifier = Modifier.testTag("reasoning_timeout_${sec}s")
+                                    )
+                                }
+                            }
+                        }
+
+                        // Real Availability Probe Button (reusing same key)
+                        FilledTonalButton(
+                            onClick = { onTestReasoningModel(apiKeyInput) },
+                            enabled = hasApiKey || apiKeyInput.isNotBlank(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("test_reasoning_model_button"),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            if (reasoningTestState is ReasoningModelTestUiState.Testing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(Icons.Default.Verified, contentDescription = null, modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Test ${activeReasoningDesc.displayName} Availability")
+                        }
+
+                        AnimatedVisibility(visible = reasoningTestState !is ReasoningModelTestUiState.Idle) {
+                            when (reasoningTestState) {
+                                is ReasoningModelTestUiState.Testing -> {
+                                    Text(
+                                        text = "Probing GET /v1beta/${activeReasoningDesc.fullResourceName}...",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                is ReasoningModelTestUiState.Available -> {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(EmeraldLive.copy(alpha = 0.14f))
+                                            .padding(12.dp)
+                                            .testTag("reasoning_test_success_box"),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = EmeraldLive)
+                                        Text(
+                                            text = reasoningTestState.report.statusMessage,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
+                                is ReasoningModelTestUiState.Unavailable -> {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(MaterialTheme.colorScheme.errorContainer)
+                                            .padding(12.dp)
+                                            .testTag("reasoning_test_error_box"),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.ErrorOutline,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onErrorContainer
+                                        )
+                                        Text(
+                                            text = reasoningTestState.report.statusMessage,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onErrorContainer
+                                        )
+                                    }
+                                }
+                                else -> Unit
+                            }
+                        }
+                    }
+                }
+
                 // 4. Official API Documentation Links
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -808,6 +1079,79 @@ private fun ModelOptionItem(
             }
             Text(
                 text = modalitiesSummary,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReasoningModelOptionItem(
+    model: AIModelDescriptor,
+    isSelected: Boolean,
+    onSelect: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(
+                if (isSelected) {
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                }
+            )
+            .border(
+                width = if (isSelected) 1.5.dp else 1.dp,
+                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                shape = RoundedCornerShape(14.dp)
+            )
+            .clickable(onClick = onSelect)
+            .padding(14.dp)
+            .testTag("reasoning_model_option_${model.shortId}"),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Icon(
+            imageVector = if (isSelected) Icons.Default.RadioButtonChecked else Icons.Default.RadioButtonUnchecked,
+            contentDescription = model.displayName,
+            tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp)
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = model.displayName,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
+            )
+            Text(
+                text = model.familyBadge,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (model.capabilities.supportsNativeToolCalling) EmeraldLive else AmberThinking
+            )
+            Text(
+                text = "API ID: ${model.id}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = model.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            val capsSummary = buildString {
+                append(if (model.capabilities.supportsNativeToolCalling) "Native Tools" else "JSON Fallback")
+                if (model.capabilities.supportsStreaming) append(" • Streaming")
+                if (model.capabilities.supportsStructuredJson) append(" • JSON")
+                append(" • ${model.capabilities.maxInputTokens / 1024}K Context")
+            }
+            Text(
+                text = capsSummary,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary
             )

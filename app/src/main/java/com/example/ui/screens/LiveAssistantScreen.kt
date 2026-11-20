@@ -187,7 +187,9 @@ fun LiveAssistantScreen(
         onSendTextMessage(it)
         true
     },
-    onLaunchFloatingAgent: () -> Unit = {}
+    onLaunchFloatingAgent: () -> Unit = {},
+    activeModelIndicator: com.example.data.ai.ActiveModelIndicator = com.example.data.ai.ActiveModelIndicator(),
+    neyaAssistantState: com.example.assistant.NeyaAssistantRuntimeState = com.example.assistant.NeyaAssistantRuntimeState()
 ) {
     BackHandler(onBack = onBack)
 
@@ -260,13 +262,48 @@ fun LiveAssistantScreen(
                                 text = sessionState.name,
                                 style = MaterialTheme.typography.labelMedium,
                                 color = dotColor,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                                 modifier = Modifier.testTag("live_state_badge")
                             )
+                            Surface(
+                                shape = RoundedCornerShape(999.dp),
+                                color = when {
+                                    activeModelIndicator.isUsingFallback -> AmberThinking.copy(alpha = 0.18f)
+                                    sessionState.isActive -> EmeraldLive.copy(alpha = 0.16f)
+                                    else -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                                },
+                                modifier = Modifier.testTag("active_model_indicator_pill")
+                            ) {
+                                Text(
+                                    text = activeModelIndicator.modeBadge,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = when {
+                                        activeModelIndicator.isUsingFallback -> AmberThinking
+                                        sessionState.isActive -> EmeraldLive
+                                        else -> MaterialTheme.colorScheme.primary
+                                    },
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
                         }
                         Text(
-                            text = selectedModelName,
+                            text = if (sessionState.isActive) {
+                                selectedModelName
+                            } else {
+                                val assistantSuffix = if (neyaAssistantState.roleStatus.isActive) {
+                                    "Neya Default"
+                                } else {
+                                    "Wake: ${neyaAssistantState.capabilityReport.effectiveActiveMode.shortLabel}"
+                                }
+                                "${activeModelIndicator.activeLabel} • $assistantSuffix"
+                            },
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     }
                 },

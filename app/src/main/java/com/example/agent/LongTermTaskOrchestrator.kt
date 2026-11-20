@@ -26,6 +26,7 @@ import java.util.UUID
 class LongTermTaskOrchestrator(
     private val repository: LongTermTaskRepository,
     private val dynamicToolManager: DynamicToolManager,
+    private val gemmaReasoningEngine: GemmaAgentReasoningEngine? = null,
     private val toolExecutor: suspend (AgentActionRequest, Boolean) -> AgentActionResult = { req, confirmed ->
         val tool = dynamicToolManager.toolRegistry.getTool(req.actionType.toolName)
         if (tool != null) {
@@ -82,7 +83,8 @@ class LongTermTaskOrchestrator(
     suspend fun createTask(
         goal: String,
         subtasks: List<TaskSubtask>,
-        nowMillis: Long = System.currentTimeMillis()
+        nowMillis: Long = System.currentTimeMillis(),
+        modelUsageNote: String? = null
     ): CreateTaskOutcome {
         val cleanGoal = MemoryPrivacyGuard.sanitizeSkillText(goal, maxLen = 180)
         if (cleanGoal.isBlank()) {
@@ -99,6 +101,13 @@ class LongTermTaskOrchestrator(
             )
         }
 
+        val checkpointPrefix = "Created with ${subtasks.size} dependency-ordered subtasks"
+        val note = if (!modelUsageNote.isNullOrBlank()) {
+            "$checkpointPrefix • ${AgentTaskLogger.sanitizeForLog(modelUsageNote)}"
+        } else {
+            checkpointPrefix
+        }
+
         val task = LongTermTask(
             taskId = "lt_${UUID.randomUUID().toString().take(10)}",
             goal = cleanGoal,
@@ -106,7 +115,7 @@ class LongTermTaskOrchestrator(
             subtasks = subtasks,
             createdAtMillis = nowMillis,
             updatedAtMillis = nowMillis,
-            lastCheckpointNote = "Created with ${subtasks.size} dependency-ordered subtasks"
+            lastCheckpointNote = note
         )
         val saved = repository.saveTask(task)
         return CreateTaskOutcome.Created(saved)
@@ -478,6 +487,46 @@ class LongTermTaskOrchestrator(
             )
         )
         return CreateTaskOutcome.Created(updated)
+    }
+
+    /**
+     * Uses Gemma 4 reasoning (when configured) to propose an alternative safe recovery plan
+     * after a subtask failure without repeating already completed or failed action signatures.
+     */
+    suspend fun attemptGuidedRecovery(taskId: String): CreateTaskOutcome? {
+        val engine = gemmaReasoningEngine ?: return null
+        val task = repository.getTaskById(taskId) ?: return null
+        val failedSub = task.subtasks.firstOrNull { it.status == SubtaskStatus.FAILED } ?: return null
+        val completedIds = task.subtasks.filter { it.status == SubtaskStatus.COMPLETED }.map { it.subtaskId }.toSet()
+        val triedFailedSignatures = task.subtasks
+            .filter { it.status == SubtaskStatus.FAILED }
+            .map { GemmaAgentReasoningEngine.actionSignature(it.toolName, it.parameters) }
+            .toSet()
+
+        val proposal = engine.proposeRecoveryPlan(
+            goal = task.goal,
+            failedSubtask = failedSub,
+            failureReason = failedSub.lastError ?: task.lastError.orEmpty(),
+            completedSubtaskIds = completedIds,
+            triedActionSignatures = triedFailedSignatures,
+            taskIdForTelemetry = taskId
+        )
+        if (!proposal.hasRecoveryPlan || proposal.replacementSubtasks.isEmpty()) {
+            return null
+        }
+
+        val lastCompletedId = task.subtasks.lastOrNull { it.status == SubtaskStatus.COMPLETED }?.subtaskId
+        val rebased = proposal.replacementSubtasks.mapIndexed { idx, sub ->
+            val uniqueId = "rec_${task.replanCount + 1}_${idx + 1}"
+            val dep = if (idx == 0) listOfNotNull(lastCompletedId) else listOf("rec_${task.replanCount + 1}_$idx")
+            sub.copy(subtaskId = uniqueId, dependsOn = dep)
+        }
+        val usageNote = proposal.modelUsage?.toCompactCheckpointTag()?.let { " • $it" }.orEmpty()
+        return replanRemainingSubtasks(
+            taskId = taskId,
+            newRemainingSubtasks = rebased,
+            reason = "${proposal.explanation}$usageNote"
+        )
     }
 
     suspend fun deleteTask(taskId: String) = repository.deleteTask(taskId)
